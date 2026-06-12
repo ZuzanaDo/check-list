@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Stavební deník</title>
+<title>Check list</title>
 <style>
   :root {
     --green: #2d6a2d;
@@ -311,7 +311,7 @@
 
 <!-- HEADER -->
 <div class="header">
-  <h1>🌿 Stavební deník</h1>
+  <h1>🌿 Check list</h1>
   <div class="header-right">
     <span id="sheets-badge" class="sheets-badge disconnected">⬤ Offline</span>
     <button class="btn btn-sm btn-secondary" id="btn-logout" style="display:none" onclick="logout()">Odhlásit</button>
@@ -322,7 +322,7 @@
 <div id="auth-section">
   <div class="auth-card">
     <div class="logo">🌿</div>
-    <h2>Stavební deník</h2>
+    <h2>Check list</h2>
     <p>Hlasové vyplňování formulářů přímo do Google Sheets. Přihlaste se svým Google účtem.</p>
     <button class="btn-google" onclick="signIn()">
       <svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
@@ -566,7 +566,7 @@
   <div class="voice-bar">
     <button class="mic-btn" id="mic-btn" onclick="toggleRecording()">🎤</button>
     <div class="voice-status" id="voice-status">
-      Klepněte na sekci výše, pak spusťte mikrofon a diktujte.
+      Stiskněte mikrofon a diktujte — klíčová slova samy přepínají sekce a řádky.
       <br><small id="active-section-label" style="color:var(--green);font-weight:600"></small>
     </div>
   </div>
@@ -592,7 +592,7 @@
 // ===================== CONFIG =====================
 const CLIENT_ID = '256930236354-3jqdr9of3gdm84qt74dvv0hoig3674ge.apps.googleusercontent.com';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
-const SPREADSHEET_NAME = 'Stavební deník — data';
+const SPREADSHEET_NAME = 'Check list — data';
 
 // ===================== STATE =====================
 let tokenClient = null;
@@ -802,7 +802,7 @@ async function ensureSheetExists(name) {
 
 function buildSheetValues(d) {
   const rows = [];
-  rows.push(['STAVEBNÍ DENÍK — ' + (currentZakazka || ''), '', '', '', '', '', '', '']);
+  rows.push(['CHECK LIST — ' + (currentZakazka || ''), '', '', '', '', '', '', '']);
   rows.push(['']);
   rows.push(['CHECKLIST ODJEZD ZE ZAKÁZKY', '', '', '', 'LIDÉ A VOZIDLA NA ZAKÁZCE']);
   rows.push(['Zakázka:', d.cl_zakazka, '', '', 'Typ vozidla:', d.voz_typ]);
@@ -811,9 +811,15 @@ function buildSheetValues(d) {
   rows.push(['Vozík:', d.cl_vozik, '', '', 'Počet km:', d.voz_pocet]);
   rows.push(['']);
   rows.push(['POLOŽKA', 'POVĚŘEN', 'SPLNĚNO', '', 'JMÉNO', 'ZAČÁTEK', 'PŘÍJEZD', 'OBĚD', 'KONEC', 'OS.KM', 'DOPRAVA KM', 'PŘÍSPĚVEK']);
-  d.checklist.forEach(item => {
-    rows.push([item.text, item.poveren, item.splneno ? 'ANO' : '']);
-  });
+  const maxRows = Math.max(d.checklist.length, d.lide.length);
+  for (let i = 0; i < maxRows; i++) {
+    const item = d.checklist[i] || { text: '', poveren: '', splneno: false };
+    const l = d.lide[i] || { jmeno:'', zacatek:'', prijezd:'', obed:'', konec:'', os_km:'', doprava_km:'', prispevek:'' };
+    rows.push([
+      item.text || '', item.poveren || '', item.splneno ? 'ANO' : '', '',
+      l.jmeno, l.zacatek, l.prijezd, l.obed, l.konec, l.os_km, l.doprava_km, l.prispevek
+    ]);
+  }
   rows.push(['']);
   rows.push(['Vedoucí:', d.cl_vedouci]);
   rows.push(['']);
@@ -847,6 +853,7 @@ function createZakazka() {
   const lokalita = document.getElementById('new-zakazka-lokalita').value.trim();
   currentZakazka = name;
   if (!zakázky[name]) zakázky[name] = { lokalita };
+  clearForm();
   // Add to select
   const sel = document.getElementById('zakazka-select');
   let exists = false;
@@ -860,6 +867,7 @@ function createZakazka() {
   document.getElementById('cl-zakazka').value = name;
   closeModal();
   if (lokalita) autoWeather(lokalita);
+  else document.getElementById('weather-display').innerHTML = '';
   showToast('Zakázka vytvořena: ' + name, 'success');
 }
 function loadZakazka() {
@@ -868,6 +876,7 @@ function loadZakazka() {
   currentZakazka = name;
   document.getElementById('cl-zakazka').value = name;
   if (zakázky[name] && zakázky[name].lokalita) autoWeather(zakázky[name].lokalita);
+  else document.getElementById('weather-display').innerHTML = '';
 }
 
 // ===================== WEATHER =====================
@@ -1029,8 +1038,8 @@ function startRecording() {
     return;
   }
   if (!voiceTarget) {
-    setVoiceStatus('⚠️ Nejprve klepněte na název sekce (zelený pruh), kam chcete diktovat.', '');
-    return;
+    voiceTarget = 'checklist'; // default starting section
+    setVoiceTarget('checklist');
   }
   recognition = new SpeechRecognition();
   recognition.lang = 'cs-CZ';
@@ -1069,7 +1078,7 @@ function stopRecording() {
   if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   document.getElementById('mic-btn').classList.remove('recording');
   document.getElementById('mic-btn').textContent = '🎤';
-  setVoiceStatus('Klepněte na sekci výše, pak spusťte mikrofon a diktujte.', '');
+  setVoiceStatus('Stiskněte mikrofon a diktujte — klíčová slova samy přepínají sekce a řádky.', '');
 }
 
 function setVoiceStatus(msg, cls) {
@@ -1217,6 +1226,29 @@ function collectFormData() {
     mat_priprava: document.getElementById('mat-priprava')?.value || '',
     checklist, lide: lideRows, material: materialRows, cinnosti: cinnostiRows,
   };
+}
+
+function clearForm() {
+  // Reset text/number/date/time inputs and textareas (except zakázka name we set right after)
+  document.querySelectorAll('.field-input, .table-section input, .table-section select').forEach(el => {
+    if (el.type === 'checkbox') el.checked = false;
+    else el.value = '';
+  });
+  // Rebuild table rows to default counts
+  renderLideTbody(5);
+  renderMaterialTbody(8);
+  renderCinnostiTbody(8);
+  renderChecklist();
+  setupVozKm();
+  // Reset voice row pointers
+  voiceTargetRowIndex = {};
+  // Reset weather display
+  document.getElementById('weather-display').innerHTML = '';
+  document.getElementById('cl-pocasi').value = '';
+  // Set today's date again
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('cl-datum').value = today;
+  document.getElementById('mat-datum').value = today;
 }
 
 function fillFormData(d) {
@@ -1367,7 +1399,7 @@ function buildPDFHTML(d) {
     .checks { font-size: 10px; margin-bottom: 4px; }
     .page-break { page-break-before: always; }
   </style></head><body>
-  <h1>🌿 STAVEBNÍ DENÍK — ${d.cl_zakazka || ''} | ${d.cl_datum || ''}</h1>
+  <h1>🌿 CHECK LIST — ${d.cl_zakazka || ''} | ${d.cl_datum || ''}</h1>
 
   <!-- PAGE 1 -->
   <div class="page">
