@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Stavební deník</title>
+<style>
+  :root {
+    --green: #2d6a2d;
+    --green-light: #e8f4e8;
+    --green-mid: #4a8c4a;
+    --orange: #d46a1a;
+    --orange-light: #fdf0e3;
+    --gray-dark: #2c2c2c;
+    --gray-mid: #666;
+    --gray-light: #f0f0f0;
+    --white: #ffffff;
+    --border: #ccc;
+    --red: #c0392b;
+    --blue: #1a5c8c;
+    --shadow: 0 2px 8px rgba(0,0,0,0.12);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #e8ede8;
+    color: var(--gray-dark);
+    min-height: 100vh;
+    font-size: 15px;
+  }
+
+  /* HEADER */
+  .header {
+    background: var(--green);
+    color: white;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow);
+  }
+  .header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+
+  /* AUTH */
+  #auth-section {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 80vh; padding: 24px;
+    text-align: center;
+  }
+  .auth-card {
+    background: white; border-radius: 16px; padding: 36px 28px;
+    box-shadow: var(--shadow); max-width: 380px; width: 100%;
+  }
+  .auth-card .logo { font-size: 48px; margin-bottom: 12px; }
+  .auth-card h2 { font-size: 22px; color: var(--green); margin-bottom: 8px; }
+  .auth-card p { color: var(--gray-mid); margin-bottom: 24px; font-size: 14px; line-height: 1.5; }
+  .btn-google {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    background: white; border: 2px solid var(--border); border-radius: 10px;
+    padding: 14px 20px; font-size: 16px; font-weight: 600; cursor: pointer;
+    width: 100%; transition: all 0.2s; color: var(--gray-dark);
+  }
+  .btn-google:hover { border-color: var(--green); background: var(--green-light); }
+  .btn-google img { width: 22px; height: 22px; }
+
+  /* MAIN APP */
+  #app-section { display: none; }
+
+  /* ZAKÁZKA BAR */
+  .zakazka-bar {
+    background: white; padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .zakazka-bar label { font-weight: 600; font-size: 13px; color: var(--green); white-space: nowrap; }
+  .zakazka-bar select, .zakazka-bar input {
+    border: 1.5px solid var(--border); border-radius: 7px;
+    padding: 7px 10px; font-size: 14px; flex: 1; min-width: 120px;
+  }
+  .zakazka-bar select:focus, .zakazka-bar input:focus { border-color: var(--green); outline: none; }
+
+  /* TABS */
+  .tabs-container {
+    background: white;
+    border-bottom: 2px solid var(--green);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs-container::-webkit-scrollbar { display: none; }
+  .tabs {
+    display: flex; min-width: max-content; padding: 0 8px;
+  }
+  .tab-btn {
+    padding: 11px 16px; border: none; background: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--gray-mid); white-space: nowrap;
+    border-bottom: 3px solid transparent; margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  .tab-btn.active { color: var(--green); border-bottom-color: var(--green); }
+  .tab-btn:hover { color: var(--green); background: var(--green-light); }
+
+  /* CONTENT */
+  .tab-content { display: none; padding: 14px 12px; }
+  .tab-content.active { display: block; }
+
+  /* VOICE BAR */
+  .voice-bar {
+    position: sticky; bottom: 0; background: white;
+    border-top: 2px solid var(--green);
+    padding: 10px 12px; display: flex; gap: 8px; align-items: center;
+    z-index: 50; box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+  }
+  .mic-btn {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: none; font-size: 24px; cursor: pointer;
+    background: var(--green); color: white;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all 0.2s; box-shadow: var(--shadow);
+  }
+  .mic-btn.recording { background: var(--red); animation: pulse 1s infinite; }
+  .mic-btn:disabled { background: var(--gray-mid); cursor: not-allowed; }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  .voice-status {
+    flex: 1; font-size: 13px; color: var(--gray-mid);
+    line-height: 1.4; min-height: 36px; display: flex; align-items: center;
+  }
+  .voice-status.listening { color: var(--red); font-weight: 600; }
+  .voice-status.error { color: var(--red); }
+
+  /* SECTION CARDS */
+  .section-card {
+    background: white; border-radius: var(--radius);
+    margin-bottom: 12px; overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  .section-header {
+    background: var(--green); color: white;
+    padding: 10px 14px; font-weight: 700; font-size: 13px;
+    letter-spacing: 0.3px; cursor: pointer;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .section-header.orange { background: var(--orange); }
+  .section-header.blue { background: var(--blue); }
+  .section-header .active-badge {
+    background: rgba(255,255,255,0.25); border-radius: 12px;
+    padding: 2px 8px; font-size: 11px;
+  }
+  .section-body { padding: 10px; }
+
+  /* FIELDS */
+  .field-row {
+    display: flex; gap: 8px; margin-bottom: 8px; align-items: flex-start;
+  }
+  .field-label {
+    font-size: 12px; color: var(--gray-mid); font-weight: 600;
+    min-width: 90px; padding-top: 9px; flex-shrink: 0;
+  }
+  .field-input {
+    flex: 1; border: 1.5px solid var(--border); border-radius: 7px;
+    padding: 8px 10px; font-size: 14px; background: white;
+    transition: border-color 0.2s; font-family: inherit;
+  }
+  .field-input:focus { border-color: var(--green); outline: none; background: var(--green-light); }
+  .field-input.voice-active { border-color: var(--red); background: #fff5f5; }
+  .field-input[readonly] { background: var(--gray-light); color: var(--gray-mid); }
+  textarea.field-input { resize: vertical; min-height: 60px; }
+
+  /* TABLE ROWS */
+  .table-section table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table-section th {
+    background: var(--green-light); color: var(--green);
+    padding: 7px 6px; text-align: left; font-size: 11px;
+    border-bottom: 2px solid var(--green);
+  }
+  .table-section td { padding: 4px 4px; border-bottom: 1px solid #eee; }
+  .table-section input, .table-section select {
+    width: 100%; border: 1px solid transparent; border-radius: 5px;
+    padding: 6px 5px; font-size: 13px; background: transparent;
+    font-family: inherit;
+  }
+  .table-section input:focus, .table-section select:focus {
+    border-color: var(--green); background: var(--green-light); outline: none;
+  }
+  .table-section tr:hover td { background: #fafafa; }
+  .table-section td.voice-active-cell { background: #fff5f5; }
+
+  /* CHECKLIST */
+  .checklist-item {
+    display: grid; grid-template-columns: 1fr 80px 80px;
+    gap: 6px; padding: 7px 6px; border-bottom: 1px solid #eee;
+    align-items: center; font-size: 13px;
+  }
+  .checklist-item:last-child { border-bottom: none; }
+  .checklist-item.note { color: var(--gray-mid); font-style: italic; font-size: 11px; grid-column: 1/-1; padding: 4px 6px; }
+  .checklist-header {
+    display: grid; grid-template-columns: 1fr 80px 80px;
+    gap: 6px; padding: 6px 6px; background: var(--green-light);
+    font-weight: 700; font-size: 11px; color: var(--green);
+    border-bottom: 2px solid var(--green);
+  }
+  .checklist-header span, .checklist-item span { text-align: center; }
+  .checklist-item input[type=text] {
+    width: 70px; border: 1px solid var(--border); border-radius: 5px;
+    padding: 5px; font-size: 12px; text-align: center;
+  }
+  .checklist-item input[type=checkbox] {
+    width: 22px; height: 22px; cursor: pointer; accent-color: var(--green);
+    display: block; margin: 0 auto;
+  }
+
+  /* BUTTONS */
+  .btn {
+    border: none; border-radius: 8px; padding: 10px 16px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: var(--green); color: white; }
+  .btn-primary:hover { background: var(--green-mid); }
+  .btn-secondary { background: var(--gray-light); color: var(--gray-dark); }
+  .btn-secondary:hover { background: #ddd; }
+  .btn-orange { background: var(--orange); color: white; }
+  .btn-blue { background: var(--blue); color: white; }
+  .btn-sm { padding: 7px 12px; font-size: 13px; }
+  .btn-danger { background: var(--red); color: white; }
+
+  /* ACTION BAR */
+  .action-bar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; background: white;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* WEATHER */
+  .weather-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--green-light); border: 1px solid var(--green);
+    border-radius: 20px; padding: 4px 10px; font-size: 12px; color: var(--green);
+    font-weight: 600;
+  }
+
+  /* AUTOSAVE */
+  .autosave-info {
+    font-size: 11px; color: var(--gray-mid); padding: 4px 12px;
+    background: var(--gray-light); text-align: right;
+  }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 200; display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .modal { background: white; border-radius: 14px; padding: 24px; width: 100%; max-width: 400px; }
+  .modal h3 { margin-bottom: 14px; color: var(--green); }
+  .modal input {
+    width: 100%; border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 15px; margin-bottom: 12px;
+  }
+  .modal input:focus { border-color: var(--green); outline: none; }
+  .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: var(--gray-dark); color: white; padding: 10px 20px;
+    border-radius: 20px; font-size: 13px; z-index: 300;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { background: var(--green); }
+  .toast.error { background: var(--red); }
+
+  /* SHEETS STATUS */
+  .sheets-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; padding: 4px 10px; border-radius: 12px;
+    font-weight: 600;
+  }
+  .sheets-badge.connected { background: var(--green-light); color: var(--green); }
+  .sheets-badge.disconnected { background: #ffeaea; color: var(--red); }
+  .sheets-badge.syncing { background: var(--orange-light); color: var(--orange); }
+
+  /* KEYWORD HIGHLIGHT */
+  .keyword-pill {
+    display: inline-block; background: var(--green-light); color: var(--green);
+    border-radius: 10px; padding: 1px 7px; font-size: 11px; font-weight: 600;
+    margin: 1px;
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 480px) {
+    .field-label { min-width: 70px; font-size: 11px; }
+    .btn { padding: 9px 12px; font-size: 13px; }
+    .header h1 { font-size: 15px; }
+  }
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+  .info-row { font-size: 11px; color: var(--gray-mid); padding: 4px 6px; }
+  .podpis-row { display: flex; gap: 12px; align-items: flex-end; margin-top: 8px; }
+  .podpis-line { border-bottom: 2px solid var(--gray-dark); width: 140px; height: 36px; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <h1>🌿 Stavební deník</h1>
+  <div class="header-right">
+    <span id="sheets-badge" class="sheets-badge disconnected">⬤ Offline</span>
+    <button class="btn btn-sm btn-secondary" id="btn-logout" style="display:none" onclick="logout()">Odhlásit</button>
+  </div>
+</div>
+
+<!-- AUTH SCREEN -->
+<div id="auth-section">
+  <div class="auth-card">
+    <div class="logo">🌿</div>
+    <h2>Stavební deník</h2>
+    <p>Hlasové vyplňování formulářů přímo do Google Sheets. Přihlaste se svým Google účtem.</p>
+    <button class="btn-google" onclick="signIn()">
+      <svg width="22" height="22" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+      Přihlásit se přes Google
+    </button>
+    <p style="margin-top:14px; font-size:12px; color:#999;">Vaše data zůstávají ve vašem Google Drive</p>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app-section">
+  <!-- Action bar -->
+  <div class="action-bar">
+    <button class="btn btn-primary btn-sm" onclick="showNewZakazkaModal()">➕ Nová zakázka</button>
+    <button class="btn btn-secondary btn-sm" onclick="saveLocal()">💾 Uložit</button>
+    <button class="btn btn-secondary btn-sm" onclick="loadLocal()">📂 Načíst</button>
+    <button class="btn btn-orange btn-sm" onclick="exportPDF()">📄 PDF</button>
+    <button class="btn btn-blue btn-sm" onclick="syncToSheets()">☁️ Sync Sheets</button>
+  </div>
+  <div class="autosave-info" id="autosave-info">Automatické ukládání každých 60 s</div>
+
+  <!-- Zakázka bar -->
+  <div class="zakazka-bar">
+    <label>ZAKÁZKA:</label>
+    <select id="zakazka-select" onchange="loadZakazka()">
+      <option value="">— vyberte —</option>
+    </select>
+    <span id="weather-display"></span>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('checklist', this)">✅ Checklist</button>
+      <button class="tab-btn" onclick="switchTab('lide', this)">👷 Lidé & Vozidla</button>
+      <button class="tab-btn" onclick="switchTab('material', this)">📦 Materiál</button>
+      <button class="tab-btn" onclick="switchTab('cinnosti', this)">🔨 Činnosti</button>
+    </div>
+  </div>
+
+  <!-- ===== TAB: CHECKLIST ===== -->
+  <div id="tab-checklist" class="tab-content active">
+
+    <div class="section-card">
+      <div class="section-header">CHECKLIST ODJEZD ZE ZAKÁZKY</div>
+      <div class="section-body">
+        <div class="field-row">
+          <span class="field-label">Datum:</span>
+          <input class="field-input" id="cl-datum" type="date" onchange="autoWeather()">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Zakázka:</span>
+          <input class="field-input" id="cl-zakazka" type="text" placeholder="název zakázky / lokalita">
+        </div>
+        <div class="info-row">⚠️ PO PŘÍJEZDU NAFOTIT VÝCHOZÍ STAV !!!</div>
+      </div>
+    </div>
+
+    <div class="section-card table-section">
+      <div class="section-header" id="cl-header" onclick="setVoiceTarget('checklist')">
+        POLOŽKY CHECKLISTU
+        <span class="active-badge" id="cl-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="checklist-header">
+        <div>POLOŽKA</div><span>POVĚŘEN</span><span>SPLNĚNO</span>
+      </div>
+      <div id="checklist-items">
+        <!-- generated by JS -->
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header orange" id="notes-header" onclick="setVoiceTarget('notes')">
+        DALŠÍ POZNÁMKY K ZAKÁZCE
+        <span class="active-badge" id="notes-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="section-body">
+        <textarea class="field-input" id="cl-notes" rows="4" placeholder="Připomínky a požadavky zákazníka, info k dalšímu postupu..."></textarea>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header">ZÁVĚREČNÉ POTVRZENÍ</div>
+      <div class="section-body">
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <label style="display:flex; gap:8px; align-items:center; font-size:13px;">
+            <input type="checkbox" id="cl-kontrola-kvality" style="width:20px;height:20px;accent-color:var(--green)">
+            Byla provedena kontrola kvality práce dle směrnice
+          </label>
+          <label style="display:flex; gap:8px; align-items:center; font-size:13px;">
+            <input type="checkbox" id="cl-servisni-kniha" style="width:20px;height:20px;accent-color:var(--green)">
+            Byl proveden zápis do servisní knihy u použité mechanizace
+          </label>
+          <label style="display:flex; gap:8px; align-items:center; font-size:13px;">
+            <input type="checkbox" id="cl-checklist-foto" style="width:20px;height:20px;accent-color:var(--green)">
+            Checklist byl vyfocen a odeslán do alba k zakázce
+          </label>
+          <label style="display:flex; gap:8px; align-items:center; font-size:13px;">
+            <input type="checkbox" id="cl-naradí-sklad" style="width:20px;height:22px;accent-color:var(--green)">
+            Odpovědná osoba zkontrolovala nářadí ve skladu po vybalení vozu
+          </label>
+        </div>
+        <div class="divider"></div>
+        <div class="field-row">
+          <span class="field-label">Vozík:</span>
+          <select class="field-input" id="cl-vozik" style="max-width:120px">
+            <option value="">—</option><option>ANO</option><option>NE</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Počasí:</span>
+          <input class="field-input" id="cl-pocasi" type="text" placeholder="teplota, oblačnost, vítr, srážky">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Vedoucí:</span>
+          <input class="field-input" id="cl-vedouci" type="text" placeholder="jméno vedoucího">
+        </div>
+        <div class="podpis-row">
+          <span style="font-size:12px;color:var(--gray-mid)">Podpis:</span>
+          <div class="podpis-line"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===== TAB: LIDÉ & VOZIDLA ===== -->
+  <div id="tab-lide" class="tab-content">
+    <div class="section-card table-section">
+      <div class="section-header" id="lide-header" onclick="setVoiceTarget('lide')">
+        LIDÉ NA ZAKÁZCE
+        <span class="active-badge" id="lide-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="section-body" style="overflow-x:auto">
+        <table id="lide-table">
+          <thead>
+            <tr>
+              <th>JMÉNO / řidič</th>
+              <th>ZAČÁTEK</th>
+              <th>PŘÍJEZD</th>
+              <th>OBĚD od-do</th>
+              <th>KONEC</th>
+              <th>OS.VŮZ km</th>
+              <th>DOPRAVA km</th>
+              <th>PŘÍSPĚVEK</th>
+            </tr>
+          </thead>
+          <tbody id="lide-tbody"></tbody>
+        </table>
+        <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="addLideRow()">+ Přidat řádek</button>
+      </div>
+    </div>
+
+    <div class="section-card table-section">
+      <div class="section-header blue" id="vozidla-header" onclick="setVoiceTarget('vozidla')">
+        VOZIDLA
+        <span class="active-badge" id="vozidla-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="section-body">
+        <div class="field-row">
+          <span class="field-label">Typ vozidla:</span>
+          <input class="field-input" id="voz-typ" type="text" placeholder="např. Transit, Ducato...">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Příjezd km:</span>
+          <input class="field-input" id="voz-prijezd" type="number" placeholder="km při příjezdu">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Odjezd km:</span>
+          <input class="field-input" id="voz-odjezd" type="number" placeholder="km při odjezdu">
+        </div>
+        <div class="field-row">
+          <span class="field-label">Počet km:</span>
+          <input class="field-input" id="voz-pocet" type="number" placeholder="celkem km" readonly>
+        </div>
+      </div>
+    </div>
+    <div class="info-row" style="padding:8px 12px;">
+      * příjezd na zakázku cestou (nabírání) | ** pracovní doba od 7:00, příchod 6:50 je rezerva
+    </div>
+  </div>
+
+  <!-- ===== TAB: MATERIÁL ===== -->
+  <div id="tab-material" class="tab-content">
+    <div class="section-card table-section">
+      <div class="section-header orange" id="material-header" onclick="setVoiceTarget('material')">
+        EVIDENCE MATERIÁLU A MECHANIZACE
+        <span class="active-badge" id="material-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="section-body">
+        <div class="field-row">
+          <span class="field-label">Datum:</span>
+          <input class="field-input" id="mat-datum" type="date">
+        </div>
+        <div style="overflow-x:auto;margin-top:8px">
+          <table id="material-table">
+            <thead>
+              <tr>
+                <th style="min-width:180px">SPOTŘEBOVANÝ MATERIÁL / STROJE</th>
+                <th>JEDNOTKA</th>
+                <th>MNOŽSTVÍ</th>
+              </tr>
+            </thead>
+            <tbody id="material-tbody"></tbody>
+          </table>
+          <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="addMaterialRow()">+ Přidat řádek</button>
+        </div>
+        <div class="divider"></div>
+        <div style="font-size:12px;color:var(--gray-mid);padding:4px 0">
+          PŘÍPRAVA (cesta, zabalení auta, úklid na firmě atd.)
+        </div>
+        <textarea class="field-input" id="mat-priprava" rows="3" placeholder="Popis přípravných prací..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TAB: ČINNOSTI ===== -->
+  <div id="tab-cinnosti" class="tab-content">
+    <div class="section-card table-section">
+      <div class="section-header" id="cinnosti-header" onclick="setVoiceTarget('cinnosti')">
+        EVIDENCE PRACOVNÍCH ČINNOSTÍ
+        <span class="active-badge" id="cinnosti-voice-badge" style="display:none">🎤 Aktivní</span>
+      </div>
+      <div class="section-body" style="overflow-x:auto">
+        <table id="cinnosti-table">
+          <thead>
+            <tr>
+              <th style="min-width:200px">SOUPIS PRACOVNÍCH OPERACÍ</th>
+              <th>VÝKON</th>
+              <th>JMÉNO</th>
+            </tr>
+          </thead>
+          <tbody id="cinnosti-tbody"></tbody>
+        </table>
+        <button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="addCinnostRow()">+ Přidat řádek</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VOICE BAR -->
+  <div class="voice-bar">
+    <button class="mic-btn" id="mic-btn" onclick="toggleRecording()">🎤</button>
+    <div class="voice-status" id="voice-status">
+      Klepněte na sekci výše, pak spusťte mikrofon a diktujte.
+      <br><small id="active-section-label" style="color:var(--green);font-weight:600"></small>
+    </div>
+  </div>
+</div>
+
+<!-- NEW ZAKÁZKA MODAL -->
+<div class="modal-overlay" id="modal-new" style="display:none">
+  <div class="modal">
+    <h3>➕ Nová zakázka</h3>
+    <input type="text" id="new-zakazka-name" placeholder="Název zakázky (např. Praha - Novák)">
+    <input type="text" id="new-zakazka-lokalita" placeholder="Lokalita (pro počasí, např. Praha)">
+    <div class="modal-btns">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary" onclick="createZakazka()">Vytvořit</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ===================== CONFIG =====================
+const CLIENT_ID = '256930236354-3jqdr9of3gdm84qt74dvv0hoig3674ge.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+const SPREADSHEET_NAME = 'Stavební deník — data';
+
+// ===================== STATE =====================
+let tokenClient = null;
+let accessToken = null;
+let spreadsheetId = null;
+let currentZakazka = null;
+let zakázky = {}; // { name: { ...data } }
+let recognition = null;
+let isRecording = false;
+let voiceTarget = null; // which section is active
+let voiceTargetRowIndex = {}; // per section, which row we're on
+let autoSaveTimer = null;
+let versions = [];
+
+// Checklist items
+const CHECKLIST_ITEMS = [
+  { text: 'Kontrola vody — vypnuté kohoutky (zazimování pokud poslední letošní návštěva)', note: false },
+  { text: 'Kontrola elektřiny — zajištění proti vodě, odpojení ze zásuvek atd.', note: false },
+  { text: 'Kontrola strojů ponechaných na stavbě — zajištění proti dešti a krádeži*', note: false },
+  { text: 'Kontrola nářadí podle soupisu — co jsme přivezli, to odvezeme (vyjma věcí co zůstávají)**', note: false },
+  { text: 'Kontrola nářadí, zda jsme nezabalili nářadí investora/zákazníka', note: false },
+  { text: '* při odjezdu na delší dobu odvézt veškeré nářadí   ** zapomenuté nářadí v záhonech a na pozemku', note: true },
+  { text: 'Soupis navazujících prací a nářadí pro další výjezd', note: false },
+  { text: 'Kontrola správného provedení a dokončení prací, vč. návazností', note: false },
+  { text: 'Úklid — zameteno, odbahněno, očištěné nářadí', note: false },
+  { text: 'pozn. i rozporacovanou zakázku opouštět tak, aby vypadala uklizeně', note: true },
+  { text: 'Pořízení fotodokumentace provedených prací', note: false },
+  { text: 'Před odjezdem informovat zákazníka o dalším postupu, vždy pozdravit', note: false },
+  { text: 'pozn. KOMUNIKACE JE INDIVIDUÁLNÍ, PŘEDEM SI ZJISTIT PROFIL ZÁKAZNÍKA', note: true },
+  { text: 'pozn. VŽDY DOKONČIT SOUBOR PRACÍ PŘED ODJEZDEM BEZ OHLEDU NA POČASÍ A ČAS!', note: true },
+];
+
+// Voice keywords → section
+const KEYWORDS = {
+  'checklist': ['checklist','kontrola','položka'],
+  'notes': ['poznámka','poznámky','připomínka','připomínky','zákazník'],
+  'lide': ['lidé','člověk','jméno','pracovník','zaměstnanec','řidič'],
+  'vozidla': ['vozidlo','auto','vůz','transit','ducato','km','kilometry'],
+  'material': ['materiál','mechanizace','stroj','spotřeba','jednotka','množství'],
+  'cinnosti': ['činnost','práce','operace','výkon'],
+  'next': ['další řádek','další','nový řádek'],
+};
+
+// ===================== INIT =====================
+window.onload = () => {
+  renderChecklist();
+  renderLideTbody(5);
+  renderMaterialTbody(8);
+  renderCinnostiTbody(8);
+  initGIS();
+  loadLocal(true);
+  startAutosave();
+  setupVozKm();
+  // set today's date
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('cl-datum').value = today;
+  document.getElementById('mat-datum').value = today;
+};
+
+function initGIS() {
+  const script = document.createElement('script');
+  script.src = 'https://accounts.google.com/gsi/client';
+  script.onload = () => {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: handleToken,
+    });
+  };
+  document.head.appendChild(script);
+}
+
+function signIn() {
+  if (!tokenClient) { showToast('Načítám Google...', 'error'); return; }
+  tokenClient.requestAccessToken();
+}
+
+function handleToken(resp) {
+  if (resp.error) { showToast('Přihlášení selhalo: ' + resp.error, 'error'); return; }
+  accessToken = resp.access_token;
+  document.getElementById('auth-section').style.display = 'none';
+  document.getElementById('app-section').style.display = 'block';
+  document.getElementById('btn-logout').style.display = '';
+  updateSheetsBadge('connected');
+  showToast('Přihlášení úspěšné ✓', 'success');
+  findOrCreateSpreadsheet();
+  autoWeather();
+}
+
+function logout() {
+  accessToken = null;
+  spreadsheetId = null;
+  document.getElementById('auth-section').style.display = '';
+  document.getElementById('app-section').style.display = 'none';
+  document.getElementById('btn-logout').style.display = 'none';
+  updateSheetsBadge('disconnected');
+}
+
+// ===================== SPREADSHEET =====================
+async function findOrCreateSpreadsheet() {
+  updateSheetsBadge('syncing');
+  try {
+    // Search for existing
+    const r = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=name='${SPREADSHEET_NAME}'+and+mimeType='application/vnd.google-apps.spreadsheet'+and+trashed=false`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    const data = await r.json();
+    if (data.files && data.files.length > 0) {
+      spreadsheetId = data.files[0].id;
+      showToast('Spreadsheet nalezen ✓', 'success');
+    } else {
+      await createSpreadsheet();
+    }
+    updateSheetsBadge('connected');
+    loadSheetZakazky();
+  } catch(e) {
+    updateSheetsBadge('disconnected');
+    showToast('Chyba připojení k Sheets', 'error');
+  }
+}
+
+async function createSpreadsheet() {
+  const r = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ properties: { title: SPREADSHEET_NAME } })
+  });
+  const data = await r.json();
+  spreadsheetId = data.spreadsheetId;
+  showToast('Nový spreadsheet vytvořen ✓', 'success');
+}
+
+async function loadSheetZakazky() {
+  if (!spreadsheetId) return;
+  try {
+    const r = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    const data = await r.json();
+    const sel = document.getElementById('zakazka-select');
+    // Clear existing options except first
+    while (sel.options.length > 1) sel.remove(1);
+    if (data.sheets) {
+      data.sheets.forEach(s => {
+        if (s.properties.title !== 'Sheet1') {
+          const opt = document.createElement('option');
+          opt.value = s.properties.title;
+          opt.textContent = s.properties.title;
+          sel.appendChild(opt);
+        }
+      });
+    }
+  } catch(e) {}
+}
+
+async function syncToSheets() {
+  if (!accessToken) { showToast('Nejste přihlášeni', 'error'); return; }
+  if (!spreadsheetId) { showToast('Spreadsheet nenalezen', 'error'); return; }
+  if (!currentZakazka) { showToast('Vyberte nebo vytvořte zakázku', 'error'); return; }
+  updateSheetsBadge('syncing');
+  try {
+    await ensureSheetExists(currentZakazka);
+    const data = collectFormData();
+    const values = buildSheetValues(data);
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(currentZakazka)}!A1:Z200?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      }
+    );
+    updateSheetsBadge('connected');
+    showToast('Synchronizováno do Sheets ✓', 'success');
+  } catch(e) {
+    updateSheetsBadge('disconnected');
+    showToast('Chyba synchronizace: ' + e.message, 'error');
+  }
+}
+
+async function ensureSheetExists(name) {
+  const r = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`,
+    { headers: { Authorization: 'Bearer ' + accessToken } }
+  );
+  const data = await r.json();
+  const exists = data.sheets && data.sheets.some(s => s.properties.title === name);
+  if (!exists) {
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name } } }] })
+      }
+    );
+    // Add to select
+    const sel = document.getElementById('zakazka-select');
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+    sel.value = name;
+  }
+}
+
+function buildSheetValues(d) {
+  const rows = [];
+  rows.push(['STAVEBNÍ DENÍK — ' + (currentZakazka || ''), '', '', '', '', '', '', '']);
+  rows.push(['']);
+  rows.push(['CHECKLIST ODJEZD ZE ZAKÁZKY', '', '', '', 'LIDÉ A VOZIDLA NA ZAKÁZCE']);
+  rows.push(['Zakázka:', d.cl_zakazka, '', '', 'Typ vozidla:', d.voz_typ]);
+  rows.push(['Datum:', d.cl_datum, '', '', 'Příjezd km:', d.voz_prijezd]);
+  rows.push(['Počasí:', d.cl_pocasi, '', '', 'Odjezd km:', d.voz_odjezd]);
+  rows.push(['Vozík:', d.cl_vozik, '', '', 'Počet km:', d.voz_pocet]);
+  rows.push(['']);
+  rows.push(['POLOŽKA', 'POVĚŘEN', 'SPLNĚNO', '', 'JMÉNO', 'ZAČÁTEK', 'PŘÍJEZD', 'OBĚD', 'KONEC', 'OS.KM', 'DOPRAVA KM', 'PŘÍSPĚVEK']);
+  d.checklist.forEach(item => {
+    rows.push([item.text, item.poveren, item.splneno ? 'ANO' : '']);
+  });
+  rows.push(['']);
+  rows.push(['Vedoucí:', d.cl_vedouci]);
+  rows.push(['']);
+  rows.push(['Poznámky:', d.cl_notes]);
+  rows.push(['']);
+  rows.push(['EVIDENCE MATERIÁLU', '', '', '', 'EVIDENCE PRACOVNÍCH ČINNOSTÍ']);
+  rows.push(['MATERIÁL / STROJE', 'JEDNOTKA', 'MNOŽSTVÍ', '', 'PRACOVNÍ OPERACE', '', '', '', '', 'VÝKON', 'JMÉNO']);
+  d.material.forEach((m, i) => {
+    const c = d.cinnosti[i] || { op: '', vykon: '', jmeno: '' };
+    rows.push([m.nazev, m.jednotka, m.mnozstvi, '', c.op, '', '', '', '', c.vykon, c.jmeno]);
+  });
+  // remaining cinnosti
+  for (let i = d.material.length; i < d.cinnosti.length; i++) {
+    const c = d.cinnosti[i];
+    rows.push(['', '', '', '', c.op, '', '', '', '', c.vykon, c.jmeno]);
+  }
+  return rows;
+}
+
+// ===================== ZAKÁZKY =====================
+function showNewZakazkaModal() {
+  document.getElementById('modal-new').style.display = 'flex';
+  document.getElementById('new-zakazka-name').focus();
+}
+function closeModal() {
+  document.getElementById('modal-new').style.display = 'none';
+}
+function createZakazka() {
+  const name = document.getElementById('new-zakazka-name').value.trim();
+  if (!name) { showToast('Zadejte název zakázky', 'error'); return; }
+  const lokalita = document.getElementById('new-zakazka-lokalita').value.trim();
+  currentZakazka = name;
+  if (!zakázky[name]) zakázky[name] = { lokalita };
+  // Add to select
+  const sel = document.getElementById('zakazka-select');
+  let exists = false;
+  for (let o of sel.options) if (o.value === name) { exists = true; sel.value = name; break; }
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+    sel.value = name;
+  }
+  document.getElementById('cl-zakazka').value = name;
+  closeModal();
+  if (lokalita) autoWeather(lokalita);
+  showToast('Zakázka vytvořena: ' + name, 'success');
+}
+function loadZakazka() {
+  const name = document.getElementById('zakazka-select').value;
+  if (!name) return;
+  currentZakazka = name;
+  document.getElementById('cl-zakazka').value = name;
+  if (zakázky[name] && zakázky[name].lokalita) autoWeather(zakázky[name].lokalita);
+}
+
+// ===================== WEATHER =====================
+async function autoWeather(lokalita) {
+  // Use Open-Meteo (free, no API key) + geocoding
+  const loc = lokalita || document.getElementById('new-zakazka-lokalita')?.value || 'Praha';
+  const datum = document.getElementById('cl-datum').value || new Date().toISOString().split('T')[0];
+  try {
+    // Geocode
+    const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(loc)}&count=1&language=cs&format=json`);
+    const gData = await geo.json();
+    if (!gData.results || !gData.results.length) return;
+    const { latitude, longitude, name } = gData.results[0];
+    // Weather (hourly for averaging 9-15)
+    const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=temperature_2m,precipitation,windspeed_10m,cloudcover&daily=temperature_2m_max,temperature_2m_min&start_date=${datum}&end_date=${datum}&timezone=Europe/Prague`;
+    const wr = await fetch(wUrl);
+    const wData = await wr.json();
+    if (!wData.hourly) return;
+    // Average 9:00–15:00 = indices 9–15
+    const temps = wData.hourly.temperature_2m.slice(9,16);
+    const clouds = wData.hourly.cloudcover.slice(9,16);
+    const winds = wData.hourly.windspeed_10m.slice(9,16);
+    const precip = wData.hourly.precipitation.slice(9,16);
+    const avg = arr => (arr.reduce((a,b)=>a+b,0)/arr.length).toFixed(1);
+    const sumPrecip = precip.reduce((a,b)=>a+b,0).toFixed(1);
+    const cloudDesc = avg(clouds) < 25 ? 'jasno' : avg(clouds) < 50 ? 'polojasno' : avg(clouds) < 75 ? 'oblačno' : 'zataženo';
+    const pocasi = `${avg(temps)}°C, ${cloudDesc}, vítr ${avg(winds)} km/h, srážky ${sumPrecip} mm`;
+    document.getElementById('cl-pocasi').value = pocasi;
+    document.getElementById('weather-display').innerHTML = `<span class="weather-badge">🌤 ${name}: ${avg(temps)}°C ${cloudDesc}</span>`;
+  } catch(e) {
+    // Silent fail
+  }
+}
+
+// ===================== RENDER TABLES =====================
+function renderChecklist() {
+  const container = document.getElementById('checklist-items');
+  container.innerHTML = '';
+  CHECKLIST_ITEMS.forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'checklist-item' + (item.note ? ' note' : '');
+    if (item.note) {
+      div.textContent = item.text;
+    } else {
+      div.innerHTML = `
+        <span style="font-size:13px">${item.text}</span>
+        <span style="text-align:center"><input type="text" id="cl-poveren-${i}" placeholder="kdo" style="width:70px;border:1px solid var(--border);border-radius:5px;padding:5px;font-size:12px;text-align:center"></span>
+        <span style="text-align:center"><input type="checkbox" id="cl-splneno-${i}" style="width:22px;height:22px;cursor:pointer;accent-color:var(--green);display:block;margin:0 auto"></span>
+      `;
+    }
+    container.appendChild(div);
+  });
+}
+
+function renderLideTbody(rows) {
+  const tbody = document.getElementById('lide-tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < rows; i++) addLideRow();
+}
+function addLideRow() {
+  const tbody = document.getElementById('lide-tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" placeholder="Jméno"></td>
+    <td><input type="time"></td>
+    <td><input type="time"></td>
+    <td><input type="text" placeholder="08:00-08:30"></td>
+    <td><input type="time"></td>
+    <td><input type="number" placeholder="0"></td>
+    <td><input type="number" placeholder="0"></td>
+    <td><input type="number" placeholder="0"></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function renderMaterialTbody(rows) {
+  const tbody = document.getElementById('material-tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < rows; i++) addMaterialRow();
+}
+function addMaterialRow() {
+  const tbody = document.getElementById('material-tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" placeholder="název materiálu / stroje"></td>
+    <td><input type="text" placeholder="ks/m/kg..."></td>
+    <td><input type="number" placeholder="0"></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function renderCinnostiTbody(rows) {
+  const tbody = document.getElementById('cinnosti-tbody');
+  tbody.innerHTML = '';
+  for (let i = 0; i < rows; i++) addCinnostRow();
+}
+function addCinnostRow() {
+  const tbody = document.getElementById('cinnosti-tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" placeholder="popis operace"></td>
+    <td><input type="text" placeholder="výkon"></td>
+    <td><input type="text" placeholder="jméno"></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function setupVozKm() {
+  const p = document.getElementById('voz-prijezd');
+  const o = document.getElementById('voz-odjezd');
+  const c = document.getElementById('voz-pocet');
+  const calc = () => {
+    const diff = (parseFloat(o.value)||0) - (parseFloat(p.value)||0);
+    c.value = diff > 0 ? diff : '';
+  };
+  p.addEventListener('input', calc);
+  o.addEventListener('input', calc);
+}
+
+// ===================== TABS =====================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ===================== VOICE TARGET =====================
+function setVoiceTarget(section) {
+  // Clear old badge
+  ['checklist','notes','lide','vozidla','material','cinnosti'].forEach(s => {
+    const b = document.getElementById(s + '-voice-badge');
+    if (b) b.style.display = 'none';
+    const h = document.getElementById(s + '-header');
+    if (h) h.style.outline = '';
+  });
+  voiceTarget = section;
+  const badge = document.getElementById(section + '-voice-badge');
+  if (badge) badge.style.display = '';
+  const header = document.getElementById(section + '-header');
+  if (header) header.style.outline = '3px solid var(--orange)';
+  const label = document.getElementById('active-section-label');
+  const names = { checklist:'Checklist', notes:'Poznámky', lide:'Lidé', vozidla:'Vozidla', material:'Materiál', cinnosti:'Činnosti' };
+  if (label) label.textContent = '🎯 Aktivní sekce: ' + (names[section] || section);
+  // Reset row index for this section
+  if (!voiceTargetRowIndex[section]) voiceTargetRowIndex[section] = 0;
+}
+
+// ===================== VOICE / SPEECH =====================
+function toggleRecording() {
+  if (isRecording) stopRecording();
+  else startRecording();
+}
+
+function startRecording() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setVoiceStatus('❌ Mikrofon nefunguje: Váš prohlížeč nepodporuje rozpoznávání řeči. Použijte Chrome nebo Edge.', 'error');
+    return;
+  }
+  if (!voiceTarget) {
+    setVoiceStatus('⚠️ Nejprve klepněte na název sekce (zelený pruh), kam chcete diktovat.', '');
+    return;
+  }
+  recognition = new SpeechRecognition();
+  recognition.lang = 'cs-CZ';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.onstart = () => {
+    isRecording = true;
+    document.getElementById('mic-btn').classList.add('recording');
+    document.getElementById('mic-btn').textContent = '⏹';
+    setVoiceStatus('🔴 Nahrávám... (mikrofon se sám nevypíná)', 'listening');
+  };
+  recognition.onresult = (e) => {
+    let final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+    }
+    if (final) processVoiceInput(final.trim());
+  };
+  recognition.onerror = (e) => {
+    let msg = '❌ Mikrofon nefunguje: ';
+    if (e.error === 'not-allowed') msg += 'Přístup k mikrofonu byl odepřen. Povolte mikrofon v nastavení prohlížeče.';
+    else if (e.error === 'no-speech') { recognition.start(); return; }
+    else if (e.error === 'network') msg += 'Problém se sítí. Zkontrolujte připojení.';
+    else msg += e.error;
+    setVoiceStatus(msg, 'error');
+    stopRecording();
+  };
+  recognition.onend = () => {
+    if (isRecording) recognition.start(); // Keep alive
+  };
+  recognition.start();
+}
+
+function stopRecording() {
+  isRecording = false;
+  if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
+  document.getElementById('mic-btn').classList.remove('recording');
+  document.getElementById('mic-btn').textContent = '🎤';
+  setVoiceStatus('Klepněte na sekci výše, pak spusťte mikrofon a diktujte.', '');
+}
+
+function setVoiceStatus(msg, cls) {
+  const el = document.getElementById('voice-status');
+  el.innerHTML = msg;
+  el.className = 'voice-status' + (cls ? ' ' + cls : '');
+}
+
+function processVoiceInput(text) {
+  const lower = text.toLowerCase();
+  // Check for section switch keywords
+  for (const [sec, kws] of Object.entries(KEYWORDS)) {
+    if (sec === 'next') continue;
+    if (kws.some(kw => lower.startsWith(kw))) {
+      // Switch section and write remainder
+      const kw = kws.find(kw => lower.startsWith(kw));
+      const remainder = text.slice(kw.length).trim();
+      setVoiceTarget(sec);
+      if (remainder) writeToSection(sec, remainder);
+      return;
+    }
+  }
+  // Check for "další řádek"
+  if (lower.includes('další řádek') || lower.includes('nový řádek')) {
+    if (voiceTarget) {
+      voiceTargetRowIndex[voiceTarget] = (voiceTargetRowIndex[voiceTarget] || 0) + 1;
+      const remainder = text.replace(/další řádek|nový řádek/gi, '').trim();
+      if (remainder) writeToSection(voiceTarget, remainder);
+    }
+    return;
+  }
+  // Write to current target
+  if (voiceTarget) writeToSection(voiceTarget, text);
+}
+
+function writeToSection(section, text) {
+  const idx = voiceTargetRowIndex[section] || 0;
+  if (section === 'notes') {
+    const ta = document.getElementById('cl-notes');
+    ta.value = ta.value ? ta.value + ' ' + text : text;
+    ta.classList.add('voice-active');
+    setTimeout(() => ta.classList.remove('voice-active'), 800);
+    return;
+  }
+  if (section === 'lide') {
+    const rows = document.getElementById('lide-tbody').querySelectorAll('tr');
+    const targetRow = findEmptyRow(rows, idx);
+    if (targetRow !== -1) {
+      const inputs = rows[targetRow].querySelectorAll('input');
+      const firstEmpty = Array.from(inputs).findIndex(i => !i.value);
+      const inp = inputs[firstEmpty >= 0 ? firstEmpty : 0];
+      inp.value = text; highlightInput(inp);
+      voiceTargetRowIndex[section] = targetRow;
+    }
+    return;
+  }
+  if (section === 'material') {
+    const rows = document.getElementById('material-tbody').querySelectorAll('tr');
+    const targetRow = findEmptyRow(rows, idx);
+    if (targetRow !== -1) {
+      const inp = rows[targetRow].querySelectorAll('input')[0];
+      inp.value = text; highlightInput(inp);
+      voiceTargetRowIndex[section] = targetRow;
+    }
+    return;
+  }
+  if (section === 'cinnosti') {
+    const rows = document.getElementById('cinnosti-tbody').querySelectorAll('tr');
+    const targetRow = findEmptyRow(rows, idx);
+    if (targetRow !== -1) {
+      const inp = rows[targetRow].querySelectorAll('input')[0];
+      inp.value = text; highlightInput(inp);
+      voiceTargetRowIndex[section] = targetRow;
+    }
+    return;
+  }
+}
+
+function findEmptyRow(rows, startIdx) {
+  // Find first empty row from startIdx
+  for (let i = startIdx; i < rows.length; i++) {
+    const inputs = rows[i].querySelectorAll('input[type=text], input[type=number]');
+    if (Array.from(inputs).some(inp => !inp.value)) return i;
+  }
+  return rows.length - 1; // fallback to last row
+}
+
+function highlightInput(inp) {
+  inp.classList.add('voice-active');
+  setTimeout(() => inp.classList.remove('voice-active'), 1000);
+}
+
+// ===================== COLLECT DATA =====================
+function collectFormData() {
+  const checklist = [];
+  CHECKLIST_ITEMS.forEach((item, i) => {
+    if (!item.note) {
+      checklist.push({
+        text: item.text,
+        poveren: document.getElementById('cl-poveren-' + i)?.value || '',
+        splneno: document.getElementById('cl-splneno-' + i)?.checked || false,
+      });
+    }
+  });
+  const lideRows = [];
+  document.getElementById('lide-tbody').querySelectorAll('tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    if (inputs[0]?.value) lideRows.push({
+      jmeno: inputs[0]?.value, zacatek: inputs[1]?.value,
+      prijezd: inputs[2]?.value, obed: inputs[3]?.value,
+      konec: inputs[4]?.value, os_km: inputs[5]?.value,
+      doprava_km: inputs[6]?.value, prispevek: inputs[7]?.value
+    });
+  });
+  const materialRows = [];
+  document.getElementById('material-tbody').querySelectorAll('tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    if (inputs[0]?.value) materialRows.push({
+      nazev: inputs[0]?.value, jednotka: inputs[1]?.value, mnozstvi: inputs[2]?.value
+    });
+  });
+  const cinnostiRows = [];
+  document.getElementById('cinnosti-tbody').querySelectorAll('tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input');
+    if (inputs[0]?.value) cinnostiRows.push({
+      op: inputs[0]?.value, vykon: inputs[1]?.value, jmeno: inputs[2]?.value
+    });
+  });
+  return {
+    cl_zakazka: document.getElementById('cl-zakazka')?.value || '',
+    cl_datum: document.getElementById('cl-datum')?.value || '',
+    cl_notes: document.getElementById('cl-notes')?.value || '',
+    cl_pocasi: document.getElementById('cl-pocasi')?.value || '',
+    cl_vozik: document.getElementById('cl-vozik')?.value || '',
+    cl_vedouci: document.getElementById('cl-vedouci')?.value || '',
+    cl_kontrola_kvality: document.getElementById('cl-kontrola-kvality')?.checked || false,
+    cl_servisni_kniha: document.getElementById('cl-servisni-kniha')?.checked || false,
+    cl_checklist_foto: document.getElementById('cl-checklist-foto')?.checked || false,
+    cl_naradí_sklad: document.getElementById('cl-naradí-sklad')?.checked || false,
+    voz_typ: document.getElementById('voz-typ')?.value || '',
+    voz_prijezd: document.getElementById('voz-prijezd')?.value || '',
+    voz_odjezd: document.getElementById('voz-odjezd')?.value || '',
+    voz_pocet: document.getElementById('voz-pocet')?.value || '',
+    mat_datum: document.getElementById('mat-datum')?.value || '',
+    mat_priprava: document.getElementById('mat-priprava')?.value || '',
+    checklist, lide: lideRows, material: materialRows, cinnosti: cinnostiRows,
+  };
+}
+
+function fillFormData(d) {
+  if (!d) return;
+  const set = (id, val) => { const el = document.getElementById(id); if(el) el.value = val||''; };
+  const chk = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
+  set('cl-zakazka', d.cl_zakazka); set('cl-datum', d.cl_datum);
+  set('cl-notes', d.cl_notes); set('cl-pocasi', d.cl_pocasi);
+  set('cl-vozik', d.cl_vozik); set('cl-vedouci', d.cl_vedouci);
+  chk('cl-kontrola-kvality', d.cl_kontrola_kvality);
+  chk('cl-servisni-kniha', d.cl_servisni_kniha);
+  chk('cl-checklist-foto', d.cl_checklist_foto);
+  chk('cl-naradí-sklad', d.cl_naradí_sklad);
+  set('voz-typ', d.voz_typ); set('voz-prijezd', d.voz_prijezd);
+  set('voz-odjezd', d.voz_odjezd); set('mat-datum', d.mat_datum);
+  set('mat-priprava', d.mat_priprava);
+  if (d.checklist) d.checklist.forEach((item, i) => {
+    const ri = CHECKLIST_ITEMS.findIndex((ci, idx) => !ci.note && idx >= i);
+    set('cl-poveren-' + ri, item.poveren);
+    chk('cl-splneno-' + ri, item.splneno);
+  });
+  // Lide
+  const ltbody = document.getElementById('lide-tbody');
+  ltbody.innerHTML = '';
+  const lideData = d.lide && d.lide.length ? d.lide : [];
+  for (let i = 0; i < Math.max(5, lideData.length); i++) addLideRow();
+  lideData.forEach((row, i) => {
+    const tr = ltbody.querySelectorAll('tr')[i];
+    if (!tr) return;
+    const inputs = tr.querySelectorAll('input');
+    inputs[0].value = row.jmeno||''; inputs[1].value = row.zacatek||'';
+    inputs[2].value = row.prijezd||''; inputs[3].value = row.obed||'';
+    inputs[4].value = row.konec||''; inputs[5].value = row.os_km||'';
+    inputs[6].value = row.doprava_km||''; inputs[7].value = row.prispevek||'';
+  });
+  // Material
+  const mtbody = document.getElementById('material-tbody');
+  mtbody.innerHTML = '';
+  const matData = d.material && d.material.length ? d.material : [];
+  for (let i = 0; i < Math.max(8, matData.length); i++) addMaterialRow();
+  matData.forEach((row, i) => {
+    const tr = mtbody.querySelectorAll('tr')[i];
+    if (!tr) return;
+    const inputs = tr.querySelectorAll('input');
+    inputs[0].value = row.nazev||''; inputs[1].value = row.jednotka||''; inputs[2].value = row.mnozstvi||'';
+  });
+  // Cinnosti
+  const ctbody = document.getElementById('cinnosti-tbody');
+  ctbody.innerHTML = '';
+  const cinData = d.cinnosti && d.cinnosti.length ? d.cinnosti : [];
+  for (let i = 0; i < Math.max(8, cinData.length); i++) addCinnostRow();
+  cinData.forEach((row, i) => {
+    const tr = ctbody.querySelectorAll('tr')[i];
+    if (!tr) return;
+    const inputs = tr.querySelectorAll('input');
+    inputs[0].value = row.op||''; inputs[1].value = row.vykon||''; inputs[2].value = row.jmeno||'';
+  });
+}
+
+// ===================== LOCAL STORAGE =====================
+function saveLocal() {
+  const data = collectFormData();
+  const entry = { timestamp: new Date().toISOString(), zakazka: currentZakazka, data };
+  versions.unshift(entry);
+  if (versions.length > 5) versions = versions.slice(0, 5);
+  try {
+    localStorage.setItem('stavebni_denik_versions', JSON.stringify(versions));
+    localStorage.setItem('stavebni_denik_latest', JSON.stringify(entry));
+    showToast('Uloženo ✓ (' + new Date().toLocaleTimeString('cs-CZ') + ')', 'success');
+    document.getElementById('autosave-info').textContent = 'Uloženo: ' + new Date().toLocaleTimeString('cs-CZ') + ' (5 verzí v prohlížeči)';
+  } catch(e) {
+    showToast('Chyba uložení: ' + e.message, 'error');
+  }
+}
+
+function loadLocal(silent) {
+  try {
+    const stored = localStorage.getItem('stavebni_denik_versions');
+    if (stored) versions = JSON.parse(stored);
+    const latest = localStorage.getItem('stavebni_denik_latest');
+    if (latest) {
+      const entry = JSON.parse(latest);
+      fillFormData(entry.data);
+      if (entry.zakazka) {
+        currentZakazka = entry.zakazka;
+        document.getElementById('cl-zakazka').value = entry.zakazka;
+      }
+      if (!silent) showToast('Načteno: ' + new Date(entry.timestamp).toLocaleString('cs-CZ'), 'success');
+    } else {
+      if (!silent) showToast('Žádná uložená data', '');
+    }
+  } catch(e) {
+    if (!silent) showToast('Chyba načítání', 'error');
+  }
+}
+
+function startAutosave() {
+  if (autoSaveTimer) clearInterval(autoSaveTimer);
+  autoSaveTimer = setInterval(() => {
+    saveLocal();
+  }, 60000);
+}
+
+// ===================== PDF EXPORT =====================
+function exportPDF() {
+  const d = collectFormData();
+  const w = window.open('', '_blank');
+  w.document.write(buildPDFHTML(d));
+  w.document.close();
+  setTimeout(() => w.print(), 800);
+}
+
+function buildPDFHTML(d) {
+  const checklistRows = CHECKLIST_ITEMS.map((item, i) => {
+    if (item.note) return `<tr><td colspan="3" style="font-style:italic;font-size:9px;color:#666;padding:2px 4px">${item.text}</td></tr>`;
+    const p = document.getElementById('cl-poveren-' + i)?.value || '';
+    const s = document.getElementById('cl-splneno-' + i)?.checked ? '☑' : '☐';
+    return `<tr><td style="font-size:10px;padding:2px 4px">${item.text}</td><td style="text-align:center;font-size:10px">${p}</td><td style="text-align:center;font-size:13px">${s}</td></tr>`;
+  }).join('');
+
+  const lideRows = d.lide.map(r => `<tr>
+    <td>${r.jmeno}</td><td>${r.zacatek}</td><td>${r.prijezd}</td>
+    <td>${r.obed}</td><td>${r.konec}</td><td>${r.os_km}</td><td>${r.doprava_km}</td><td>${r.prispevek}</td>
+  </tr>`).join('');
+
+  const matRows = d.material.map(r => `<tr><td>${r.nazev}</td><td>${r.jednotka}</td><td>${r.mnozstvi}</td></tr>`).join('');
+  const cinRows = d.cinnosti.map(r => `<tr><td>${r.op}</td><td>${r.vykon}</td><td>${r.jmeno}</td></tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 10px; color: #111; }
+    h1 { font-size: 13px; background: #2d6a2d; color: white; padding: 5px 8px; margin-bottom: 6px; }
+    h2 { font-size: 10px; background: #2d6a2d; color: white; padding: 3px 6px; margin-bottom: 3px; }
+    h2.orange { background: #d46a1a; }
+    h2.blue { background: #1a5c8c; }
+    .page { display: flex; gap: 8mm; }
+    .col { flex: 1; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+    th { background: #e8f4e8; color: #2d6a2d; font-size: 9px; padding: 3px 4px; border: 1px solid #aaa; text-align: left; }
+    td { padding: 2px 4px; border: 1px solid #ccc; vertical-align: top; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .info { font-size: 9px; color: #555; margin-bottom: 4px; }
+    .meta { display: flex; gap: 12px; margin-bottom: 6px; font-size: 10px; }
+    .meta span { font-weight: bold; }
+    .notes { border: 1px solid #ccc; padding: 4px 6px; min-height: 30px; font-size: 10px; margin-bottom: 6px; }
+    .checks { font-size: 10px; margin-bottom: 4px; }
+    .page-break { page-break-before: always; }
+  </style></head><body>
+  <h1>🌿 STAVEBNÍ DENÍK — ${d.cl_zakazka || ''} | ${d.cl_datum || ''}</h1>
+
+  <!-- PAGE 1 -->
+  <div class="page">
+    <!-- CHECKLIST -->
+    <div class="col">
+      <h2>✅ CHECKLIST ODJEZD ZE ZAKÁZKY</h2>
+      <div class="meta">Zakázka: <span>${d.cl_zakazka}</span> &nbsp; Datum: <span>${d.cl_datum}</span></div>
+      <table>
+        <thead><tr><th>POLOŽKA</th><th>POVĚŘEN</th><th>✓</th></tr></thead>
+        <tbody>${checklistRows}</tbody>
+      </table>
+      <div class="info">Počasí: ${d.cl_pocasi}</div>
+      <div class="info">Vozík: ${d.cl_vozik} | Vedoucí: ${d.cl_vedouci}</div>
+      <div class="checks">
+        ${d.cl_kontrola_kvality ? '☑' : '☐'} Kontrola kvality práce dle směrnice<br>
+        ${d.cl_servisni_kniha ? '☑' : '☐'} Zápis do servisní knihy<br>
+        ${d.cl_checklist_foto ? '☑' : '☐'} Checklist vyfocen a odeslán<br>
+        ${d.cl_naradí_sklad ? '☑' : '☐'} Kontrola nářadí ve skladu
+      </div>
+      <div>Poznámky: <div class="notes">${d.cl_notes}</div></div>
+    </div>
+    <!-- LIDÉ -->
+    <div class="col">
+      <h2 class="blue">👷 LIDÉ A VOZIDLA NA ZAKÁZCE</h2>
+      <table>
+        <thead><tr><th>JMÉNO</th><th>ZAČÁTEK</th><th>PŘÍJEZD</th><th>OBĚD</th><th>KONEC</th><th>OS.KM</th><th>DOPR.KM</th><th>PŘÍSP.</th></tr></thead>
+        <tbody>${lideRows}</tbody>
+      </table>
+      <h2 style="margin-top:6px">🚐 VOZIDLO</h2>
+      <table>
+        <tbody>
+          <tr><td><b>Typ:</b></td><td>${d.voz_typ}</td><td><b>Příjezd km:</b></td><td>${d.voz_prijezd}</td></tr>
+          <tr><td><b>Odjezd km:</b></td><td>${d.voz_odjezd}</td><td><b>Celkem km:</b></td><td>${d.voz_pocet}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- PAGE 2 -->
+  <div class="page page-break">
+    <div class="col">
+      <h2 class="orange">📦 EVIDENCE MATERIÁLU A MECHANIZACE</h2>
+      <div class="info">Datum: ${d.mat_datum}</div>
+      <table>
+        <thead><tr><th>MATERIÁL / STROJE</th><th>JEDNOTKA</th><th>MNOŽSTVÍ</th></tr></thead>
+        <tbody>${matRows}</tbody>
+      </table>
+      <div style="margin-top:6px;font-size:9px;font-weight:bold">PŘÍPRAVA:</div>
+      <div class="notes">${d.mat_priprava}</div>
+    </div>
+    <div class="col">
+      <h2>🔨 EVIDENCE PRACOVNÍCH ČINNOSTÍ</h2>
+      <table>
+        <thead><tr><th>SOUPIS PRACOVNÍCH OPERACÍ</th><th>VÝKON</th><th>JMÉNO</th></tr></thead>
+        <tbody>${cinRows}</tbody>
+      </table>
+    </div>
+  </div>
+  </body></html>`;
+}
+
+// ===================== UI HELPERS =====================
+function updateSheetsBadge(state) {
+  const b = document.getElementById('sheets-badge');
+  if (state === 'connected') { b.className = 'sheets-badge connected'; b.textContent = '⬤ Sheets OK'; }
+  else if (state === 'syncing') { b.className = 'sheets-badge syncing'; b.textContent = '⟳ Synchronizuji...'; }
+  else { b.className = 'sheets-badge disconnected'; b.textContent = '⬤ Offline'; }
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  setTimeout(() => t.className = 'toast', 2800);
+}
+</script>
+</body>
+</html>
