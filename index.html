@@ -593,6 +593,8 @@
 const CLIENT_ID = '256930236354-3jqdr9of3gdm84qt74dvv0hoig3674ge.apps.googleusercontent.com';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 const SPREADSHEET_NAME = 'Check list — data';
+const TEMPLATE_SHEET_NAME = 'List2';
+const TEMPLATE_SPREADSHEET_ID = '1QG5nZVqsYfUDk15X-BrGxv7aTVY5BQBNAj4t4IwaYHo';
 
 // ===================== STATE =====================
 let tokenClient = null;
@@ -723,6 +725,53 @@ async function createSpreadsheet() {
   });
   const data = await r.json();
   spreadsheetId = data.spreadsheetId;
+
+  // Copy the List2 template sheet from the original template spreadsheet
+  try {
+    const tplResp = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${TEMPLATE_SPREADSHEET_ID}`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    const tplData = await tplResp.json();
+    const tplSheet = tplData.sheets.find(s => s.properties.title === TEMPLATE_SHEET_NAME);
+    if (tplSheet) {
+      const dupResp = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${TEMPLATE_SPREADSHEET_ID}/sheets/${tplSheet.properties.sheetId}:copyTo`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ destinationSpreadsheetId: spreadsheetId })
+        }
+      );
+      const dupData = await dupResp.json();
+      // Rename copied sheet to List2 and remove default Sheet1
+      const newSheetTitle = dupData.title; // e.g. "List2 (Copy from ...)"
+      const newSheetId = dupData.sheetId;
+      const destResp = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`,
+        { headers: { Authorization: 'Bearer ' + accessToken } }
+      );
+      const destData = await destResp.json();
+      const defaultSheet = destData.sheets.find(s => s.properties.title === 'Sheet1');
+      const requests = [{
+        updateSheetProperties: { properties: { sheetId: newSheetId, title: TEMPLATE_SHEET_NAME }, fields: 'title' }
+      }];
+      if (defaultSheet) {
+        requests.push({ deleteSheet: { sheetId: defaultSheet.properties.sheetId } });
+      }
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests })
+        }
+      );
+    }
+  } catch(e) {
+    console.error('Template copy failed', e);
+  }
+
   showToast('Nový spreadsheet vytvořen ✓', 'success');
 }
 
@@ -758,13 +807,13 @@ async function syncToSheets() {
   try {
     await ensureSheetExists(currentZakazka);
     const data = collectFormData();
-    const values = buildSheetValues(data);
+    const valueRanges = buildSheetValueRanges(data, currentZakazka);
     await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(currentZakazka)}!A1:Z200?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
       {
-        method: 'PUT',
+        method: 'POST',
         headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ values })
+        body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data: valueRanges })
       }
     );
     updateSheetsBadge('connected');
@@ -783,60 +832,135 @@ async function ensureSheetExists(name) {
   const data = await r.json();
   const exists = data.sheets && data.sheets.some(s => s.properties.title === name);
   if (!exists) {
-    await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
-      {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name } } }] })
-      }
-    );
+    // Find the template sheet to duplicate
+    const template = data.sheets.find(s => s.properties.title === TEMPLATE_SHEET_NAME);
+    if (template) {
+      // Duplicate the template sheet
+      const dupResp = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/sheets/${template.properties.sheetId}:copyTo`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ destinationSpreadsheetId: spreadsheetId })
+        }
+      );
+      const dupData = await dupResp.json();
+      // Rename the duplicated sheet to the zakázka name
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{
+            updateSheetProperties: {
+              properties: { sheetId: dupData.sheetId, title: name },
+              fields: 'title'
+            }
+          }]})
+        }
+      );
+    } else {
+      // Fallback: create a blank sheet if template not found
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name } } }] })
+        }
+      );
+      showToast('⚠️ Šablona "List2" nenalezena, vytvořen prázdný list', 'error');
+    }
     // Add to select
     const sel = document.getElementById('zakazka-select');
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    sel.appendChild(opt);
+    let exists2 = false;
+    for (let o of sel.options) if (o.value === name) exists2 = true;
+    if (!exists2) {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      sel.appendChild(opt);
+    }
     sel.value = name;
   }
 }
 
-function buildSheetValues(d) {
-  const rows = [];
-  rows.push(['CHECK LIST — ' + (currentZakazka || ''), '', '', '', '', '', '', '']);
-  rows.push(['']);
-  rows.push(['CHECKLIST ODJEZD ZE ZAKÁZKY', '', '', '', 'LIDÉ A VOZIDLA NA ZAKÁZCE']);
-  rows.push(['Zakázka:', d.cl_zakazka, '', '', 'Typ vozidla:', d.voz_typ]);
-  rows.push(['Datum:', d.cl_datum, '', '', 'Příjezd km:', d.voz_prijezd]);
-  rows.push(['Počasí:', d.cl_pocasi, '', '', 'Odjezd km:', d.voz_odjezd]);
-  rows.push(['Vozík:', d.cl_vozik, '', '', 'Počet km:', d.voz_pocet]);
-  rows.push(['']);
-  rows.push(['POLOŽKA', 'POVĚŘEN', 'SPLNĚNO', '', 'JMÉNO', 'ZAČÁTEK', 'PŘÍJEZD', 'OBĚD', 'KONEC', 'OS.KM', 'DOPRAVA KM', 'PŘÍSPĚVEK']);
-  const maxRows = Math.max(d.checklist.length, d.lide.length);
-  for (let i = 0; i < maxRows; i++) {
-    const item = d.checklist[i] || { text: '', poveren: '', splneno: false };
-    const l = d.lide[i] || { jmeno:'', zacatek:'', prijezd:'', obed:'', konec:'', os_km:'', doprava_km:'', prispevek:'' };
-    rows.push([
-      item.text || '', item.poveren || '', item.splneno ? 'ANO' : '', '',
-      l.jmeno, l.zacatek, l.prijezd, l.obed, l.konec, l.os_km, l.doprava_km, l.prispevek
-    ]);
-  }
-  rows.push(['']);
-  rows.push(['Vedoucí:', d.cl_vedouci]);
-  rows.push(['']);
-  rows.push(['Poznámky:', d.cl_notes]);
-  rows.push(['']);
-  rows.push(['EVIDENCE MATERIÁLU', '', '', '', 'EVIDENCE PRACOVNÍCH ČINNOSTÍ']);
-  rows.push(['MATERIÁL / STROJE', 'JEDNOTKA', 'MNOŽSTVÍ', '', 'PRACOVNÍ OPERACE', '', '', '', '', 'VÝKON', 'JMÉNO']);
-  d.material.forEach((m, i) => {
-    const c = d.cinnosti[i] || { op: '', vykon: '', jmeno: '' };
-    rows.push([m.nazev, m.jednotka, m.mnozstvi, '', c.op, '', '', '', '', c.vykon, c.jmeno]);
+// Build value ranges mapped to exact cell addresses of the original blank template (List2 layout)
+function buildSheetValueRanges(d, sheetName) {
+  const S = (cell) => `'${sheetName}'!${cell}`;
+  const ranges = [];
+  const push = (cell, value) => ranges.push({ range: S(cell), values: [[value === undefined || value === null ? '' : value]] });
+
+  // Header: zakázka (A7) and datum (B7)
+  push('A7', d.cl_zakazka);
+  push('B7', d.cl_datum);
+
+  // Checklist items: rows 11-25, columns B (POVĚŘEN) and C (SPLNĚNO)
+  // Row order in CHECKLIST_ITEMS maps to sheet rows 11..25 (note rows 16,20,23,25 are merged note rows, skip those for input)
+  const checklistRowMap = [11,12,13,14,15,17,18,19,21,22,24]; // 11 actual checkable items (matches CHECKLIST_ITEMS non-note entries)
+  d.checklist.forEach((item, i) => {
+    const row = checklistRowMap[i];
+    if (!row) return;
+    push(`B${row}`, item.poveren || '');
+    push(`C${row}`, item.splneno ? 'ANO' : '');
   });
-  // remaining cinnosti
-  for (let i = d.material.length; i < d.cinnosti.length; i++) {
-    const c = d.cinnosti[i];
-    rows.push(['', '', '', '', c.op, '', '', '', '', c.vykon, c.jmeno]);
+
+  // Notes: E27 (merged E27:F28 area, top-left cell)
+  push('E27', d.cl_notes);
+
+  // Lidé grid: rows 8,10,12,14,16,18,20,22,24,27 (top row of each merged pair) - up to 10 people
+  const lideRowMap = [8,10,12,14,16,18,20,22,24,27];
+  d.lide.forEach((row, i) => {
+    const r = lideRowMap[i];
+    if (!r) return;
+    push(`E${r}`, row.jmeno || '');
+    push(`G${r}`, row.zacatek || '');
+    push(`H${r}`, row.prijezd || '');
+    push(`I${r}`, row.obed || '');
+    push(`J${r}`, row.konec || '');
+    push(`K${r}`, row.os_km || '');
+    push(`L${r}`, row.doprava_km || '');
+  });
+
+  // Vozidlo
+  push('F31', d.voz_typ);
+  push('F32', d.voz_prijezd);
+  push('J32', d.voz_odjezd);
+  push('F33', d.voz_pocet);
+
+  // Confirmation checkboxes -> write ANO/NE into column D next to each statement
+  push('D35', d.cl_kontrola_kvality ? 'ANO' : 'NE');
+  push('D36', d.cl_servisni_kniha ? 'ANO' : 'NE');
+  push('D38', d.cl_checklist_foto ? 'ANO' : 'NE');
+  push('D39', d.cl_naradí_sklad ? 'ANO' : 'NE');
+
+  // Vozík ANO/NE and počasí
+  push('F35', d.cl_vozik || '');
+  push('F36', d.cl_pocasi || '');
+
+  // Vedoucí jméno
+  push('D41', d.cl_vedouci || '');
+
+  // Materiál: rows 47-65, columns A (název), B (jednotka), C (množství)
+  for (let i = 0; i < d.material.length && i < 19; i++) {
+    const r = 47 + i;
+    push(`A${r}`, d.material[i].nazev || '');
+    push(`B${r}`, d.material[i].jednotka || '');
+    push(`C${r}`, d.material[i].mnozstvi || '');
   }
-  return rows;
+  // Materiál datum
+  push('D44', d.mat_datum || '');
+
+  // Činnosti: rows 47-65, columns E (operace), J (výkon), K (jméno) - merged pairs but write to top row
+  const cinRowMap = [];
+  for (let r = 47; r <= 65; r += 2) cinRowMap.push(r); // 10 merged pairs approx
+  d.cinnosti.forEach((row, i) => {
+    const r = cinRowMap[i] || (47 + i);
+    push(`E${r}`, row.op || '');
+    push(`J${r}`, row.vykon || '');
+    push(`K${r}`, row.jmeno || '');
+  });
+
+  return ranges;
 }
 
 // ===================== ZAKÁZKY =====================
@@ -1053,24 +1177,41 @@ function startRecording() {
   };
   recognition.onresult = (e) => {
     let final = '';
+    let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
     }
-    if (final) processVoiceInput(final.trim());
+    if (interim) setVoiceStatus('🔴 Slyším: "' + interim + '"', 'listening');
+    if (final) {
+      processVoiceInput(final.trim());
+      setVoiceStatus('🔴 Nahrávám... (mikrofon se sám nevypíná)', 'listening');
+    }
   };
   recognition.onerror = (e) => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return; // onend will restart
     let msg = '❌ Mikrofon nefunguje: ';
-    if (e.error === 'not-allowed') msg += 'Přístup k mikrofonu byl odepřen. Povolte mikrofon v nastavení prohlížeče.';
-    else if (e.error === 'no-speech') { recognition.start(); return; }
-    else if (e.error === 'network') msg += 'Problém se sítí. Zkontrolujte připojení.';
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') msg += 'Přístup k mikrofonu byl odepřen. Povolte mikrofon v nastavení prohlížeče (ikona zámku v adresním řádku).';
+    else if (e.error === 'network') msg += 'Problém se sítí. Zkontrolujte připojení k internetu.';
+    else if (e.error === 'audio-capture') msg += 'Nebyl nalezen žádný mikrofon. Zkontrolujte, že je připojen a povolen.';
     else msg += e.error;
     setVoiceStatus(msg, 'error');
     stopRecording();
   };
   recognition.onend = () => {
-    if (isRecording) recognition.start(); // Keep alive
+    if (isRecording) {
+      try { recognition.start(); }
+      catch(err) {
+        // brief delay then retry once
+        setTimeout(() => { if (isRecording) { try { recognition.start(); } catch(e2){} } }, 200);
+      }
+    }
   };
-  recognition.start();
+  try {
+    recognition.start();
+  } catch(err) {
+    setVoiceStatus('❌ Mikrofon nefunguje: ' + err.message + '. Zkuste obnovit stránku.', 'error');
+  }
 }
 
 function stopRecording() {
