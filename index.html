@@ -1571,8 +1571,42 @@ function setCellValue(tbodyId, rowIdx, colIdx, value) {
   const rows = document.getElementById(tbodyId).querySelectorAll('tr');
   if (!rows[rowIdx]) return;
   const inputs = rows[rowIdx].querySelectorAll('input');
-  if (inputs[colIdx]) inputs[colIdx].value = (value === null || value === undefined) ? '' : value;
+  const inp = inputs[colIdx];
+  if (!inp) return;
+  let v = (value === null || value === undefined) ? '' : value;
+  if (inp.type === 'time' && v) v = normalizeTime(v);
+  inp.value = v;
 }
+
+// Normalize spoken time like "7", "7:00", "7.00", "sedm", "7 hodin" -> "HH:MM" for <input type=time>
+function normalizeTime(text) {
+  let t = String(text).toLowerCase().trim();
+  // Replace word numbers commonly produced by speech recognition (basic set)
+  const wordNums = {
+    'jedna':'1','jednu':'1','dvě':'2','dva':'2','tři':'3','čtyři':'4','pět':'5',
+    'šest':'6','sedm':'7','osm':'8','devět':'9','deset':'10','jedenáct':'11',
+    'dvanáct':'12','třináct':'13','čtrnáct':'14','patnáct':'15','šestnáct':'16',
+    'sedmnáct':'17','osmnáct':'18','devatenáct':'19','dvacet':'20'
+  };
+  for (const [w,n] of Object.entries(wordNums)) {
+    t = t.replace(new RegExp('\\b'+w+'\\b','g'), n);
+  }
+  // Match "H:MM", "H.MM", "H MM", "HMM"
+  let m = t.match(/(\d{1,2})\s*[:.]\s*(\d{1,2})/);
+  if (m) {
+    let h = parseInt(m[1],10), mi = parseInt(m[2],10);
+    if (h>=0&&h<=23&&mi>=0&&mi<=59) return pad2(h)+':'+pad2(mi);
+  }
+  // Match "v 7 hodin", "7 hodin", "v 7" -> just hour, minutes = 00
+  m = t.match(/(\d{1,2})/);
+  if (m) {
+    let h = parseInt(m[1],10);
+    if (h>=0&&h<=23) return pad2(h)+':00';
+  }
+  return ''; // couldn't parse - leave empty rather than invalid value
+}
+function pad2(n){ return n.toString().padStart(2,'0'); }
+
 function highlightRow(tbodyId, rowIdx) {
   const rows = document.getElementById(tbodyId).querySelectorAll('tr');
   if (!rows[rowIdx]) return;
@@ -1635,9 +1669,18 @@ function nextEmptyRow(tbodyId, currentActive) {
     const firstVal = rows[currentActive].querySelectorAll('input')[0]?.value;
     if (!firstVal) return currentActive;
   }
-  for (let i = 0; i < rows.length; i++) {
+  // Search forward starting from currentActive+1 (never go back to earlier filled rows)
+  const start = currentActive !== -1 ? currentActive + 1 : 0;
+  for (let i = start; i < rows.length; i++) {
     const firstVal = rows[i].querySelectorAll('input')[0]?.value;
     if (!firstVal) return i;
+  }
+  // Also check rows before start, in case currentActive was -1 and some earlier rows are empty
+  if (start > 0) {
+    for (let i = 0; i < start; i++) {
+      const firstVal = rows[i].querySelectorAll('input')[0]?.value;
+      if (!firstVal) return i;
+    }
   }
   // All full - add new row
   if (tbodyId === 'material-tbody') addMaterialRow();
