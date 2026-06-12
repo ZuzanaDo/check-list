@@ -566,8 +566,9 @@
   <div class="voice-bar">
     <button class="mic-btn" id="mic-btn" onclick="toggleRecording()">🎤</button>
     <div class="voice-status" id="voice-status">
-      Stiskněte mikrofon a diktujte — klíčová slova samy přepínají sekce a řádky.
-      <br><small id="active-section-label" style="color:var(--green);font-weight:600"></small>
+      <div id="voice-heard" style="font-weight:700; color:var(--gray-dark)">Stiskněte mikrofon a diktujte</div>
+      <div id="voice-sub" style="font-size:11px; color:var(--gray-mid)">klíčová slova samy přepínají sekce a řádky</div>
+      <small id="active-section-label" style="color:var(--green);font-weight:600"></small>
     </div>
   </div>
 </div>
@@ -604,8 +605,11 @@ let currentZakazka = null;
 let zakázky = {}; // { name: { ...data } }
 let recognition = null;
 let isRecording = false;
-let voiceTarget = null; // which section is active
-let voiceTargetRowIndex = {}; // per section, which row we're on
+let voiceTarget = null; // which section is active: checklist|notes|lide|material|cinnosti
+let voiceActivePersonRow = -1; // index of active person row in lide-tbody
+let voiceActiveMaterialRow = -1; // index of active row in material-tbody
+let voiceActiveCinnostRow = -1; // index of active row in cinnosti-tbody
+let voiceNotesPendingNewLine = false; // true if next note text should start on a new line
 let autoSaveTimer = null;
 let versions = [];
 
@@ -627,15 +631,58 @@ const CHECKLIST_ITEMS = [
   { text: 'pozn. VŽDY DOKONČIT SOUBOR PRACÍ PŘED ODJEZDEM BEZ OHLEDU NA POČASÍ A ČAS!', note: true },
 ];
 
-// Voice keywords → section
-const KEYWORDS = {
-  'checklist': ['checklist','kontrola','položka'],
-  'notes': ['poznámka','poznámky','připomínka','připomínky','zákazník'],
-  'lide': ['lidé','člověk','jméno','pracovník','zaměstnanec','řidič'],
-  'vozidla': ['vozidlo','auto','vůz','transit','ducato','km','kilometry'],
-  'material': ['materiál','mechanizace','stroj','spotřeba','jednotka','množství'],
-  'cinnosti': ['činnost','práce','operace','výkon'],
-  'next': ['další řádek','další','nový řádek'],
+// Field-level voice keywords. Order matters: longer/more specific phrases first.
+// Each entry: { keys: [phrases], section: target tab section, action: handler name }
+const FIELD_KEYWORDS = [
+  // --- ZAKÁZKA / HLAVIČKA ---
+  { keys: ['zakázka'], section: 'checklist', action: 'zakazka' },
+  { keys: ['vedoucí'], section: 'checklist', action: 'vedouci' },
+  { keys: ['další poznámka', 'další poznámky'], section: 'checklist', action: 'noteNewLine' },
+  { keys: ['poznámka', 'poznámky'], section: 'checklist', action: 'note' },
+  { keys: ['vozík'], section: 'checklist', action: 'vozik' },
+  { keys: ['počasí'], section: 'checklist', action: 'pocasi' },
+
+  // --- LIDÉ & VOZIDLA ---
+  { keys: ['začátek práce', 'začátek'], section: 'lide', action: 'osobaZacatek' },
+  { keys: ['příjezd'], section: 'lide', action: 'prijezd' }, // ambiguous - handled specially
+  { keys: ['oběd'], section: 'lide', action: 'osobaObed' },
+  { keys: ['konec'], section: 'lide', action: 'osobaKonec' },
+  { keys: ['kilometry', 'kilometrů', 'počet kilometrů', 'počet km'], section: 'lide', action: 'kilometry' }, // ambiguous - handled specially
+  { keys: ['příspěvek'], section: 'lide', action: 'osobaPrispevek' },
+  { keys: ['vozidlo', 'auto'], section: 'lide', action: 'vozidloTyp' },
+  { keys: ['odjezd'], section: 'lide', action: 'vozidloOdjezd' },
+  { keys: ['jméno'], section: null, action: 'jmeno' }, // depends on active section
+
+  // --- MATERIÁL ---
+  { keys: ['materiál'], section: 'material', action: 'materialNovy' },
+  { keys: ['jednotka'], section: 'material', action: 'materialJednotka' },
+  { keys: ['množství'], section: 'material', action: 'materialMnozstvi' },
+
+  // --- ČINNOSTI ---
+  { keys: ['práce', 'činnost'], section: 'cinnosti', action: 'cinnostNova' },
+  { keys: ['výkon'], section: 'cinnosti', action: 'cinnostVykon' },
+
+  // --- SECTION SWITCHES (no specific field) ---
+  { keys: ['checklist', 'kontrola', 'položka'], section: 'checklist', action: 'switchOnly' },
+  { keys: ['lidé', 'pracovník', 'zaměstnanec', 'řidič'], section: 'lide', action: 'switchOnly' },
+  { keys: ['mechanizace', 'stroj', 'spotřeba'], section: 'material', action: 'switchOnly' },
+  { keys: ['operace'], section: 'cinnosti', action: 'switchOnly' },
+];
+
+// "next row" phrases
+const NEXT_ROW_PHRASES = ['další řádek', 'nový řádek', 'další'];
+
+// Units recognized in material dictation (mapped to display unit)
+const UNIT_WORDS = {
+  'hodina':'h','hodiny':'h','hodin':'h','hodinu':'h','h':'h',
+  'kus':'ks','kusy':'ks','kusů':'ks','kusu':'ks','ks':'ks',
+  'kilo':'kg','kilogram':'kg','kilogramy':'kg','kilogramů':'kg','kg':'kg',
+  'gram':'g','gramy':'g','gramů':'g','g':'g',
+  'litr':'l','litry':'l','litrů':'l','l':'l',
+  'metr':'m','metry':'m','metrů':'m','m':'m',
+  'metr čtverečný':'m2','metry čtvereční':'m2','m2':'m2','metr krychlový':'m3','m3':'m3',
+  'tona':'t','tuny':'t','tun':'t','t':'t',
+  'balení':'bal','bal':'bal','sada':'sada','sady':'sada','sad':'sada',
 };
 
 // ===================== INIT =====================
@@ -1124,8 +1171,18 @@ function setupVozKm() {
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  btn.classList.add('active');
+  const content = document.getElementById('tab-' + name);
+  if (content) content.classList.add('active');
+  if (btn) {
+    btn.classList.add('active');
+  } else {
+    // Find the tab button by matching its onclick attribute
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'" + name + "'")) {
+        b.classList.add('active');
+      }
+    });
+  }
 }
 
 // ===================== VOICE TARGET =====================
@@ -1145,8 +1202,16 @@ function setVoiceTarget(section) {
   const label = document.getElementById('active-section-label');
   const names = { checklist:'Checklist', notes:'Poznámky', lide:'Lidé', vozidla:'Vozidla', material:'Materiál', cinnosti:'Činnosti' };
   if (label) label.textContent = '🎯 Aktivní sekce: ' + (names[section] || section);
-  // Reset row index for this section
-  if (!voiceTargetRowIndex[section]) voiceTargetRowIndex[section] = 0;
+
+  // Open the tab that contains this section so the user can see it being filled
+  const sectionToTab = {
+    checklist: 'checklist', notes: 'checklist',
+    lide: 'lide', vozidla: 'lide',
+    material: 'material',
+    cinnosti: 'cinnosti'
+  };
+  const tab = sectionToTab[section];
+  if (tab) switchTab(tab);
 }
 
 // ===================== VOICE / SPEECH =====================
@@ -1158,7 +1223,7 @@ function toggleRecording() {
 function startRecording() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    setVoiceStatus('❌ Mikrofon nefunguje: Váš prohlížeč nepodporuje rozpoznávání řeči. Použijte Chrome nebo Edge.', 'error');
+    setVoiceHeard('❌ Mikrofon nefunguje: Váš prohlížeč nepodporuje rozpoznávání řeči. Použijte Chrome nebo Edge.', 'error');
     return;
   }
   if (!voiceTarget) {
@@ -1173,7 +1238,8 @@ function startRecording() {
     isRecording = true;
     document.getElementById('mic-btn').classList.add('recording');
     document.getElementById('mic-btn').textContent = '⏹';
-    setVoiceStatus('🔴 Nahrávám... (mikrofon se sám nevypíná)', 'listening');
+    setVoiceHeard('🔴 Poslouchám...', '');
+    setVoiceSub('Mikrofon se sám nevypíná, klikněte ⏹ pro zastavení');
   };
   recognition.onresult = (e) => {
     let final = '';
@@ -1182,10 +1248,10 @@ function startRecording() {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    if (interim) setVoiceStatus('🔴 Slyším: "' + interim + '"', 'listening');
+    if (interim) setVoiceHeard('🎙️ ' + interim, 'listening');
     if (final) {
+      setVoiceHeard('✅ ' + final, 'listening');
       processVoiceInput(final.trim());
-      setVoiceStatus('🔴 Nahrávám... (mikrofon se sám nevypíná)', 'listening');
     }
   };
   recognition.onerror = (e) => {
@@ -1195,7 +1261,7 @@ function startRecording() {
     else if (e.error === 'network') msg += 'Problém se sítí. Zkontrolujte připojení k internetu.';
     else if (e.error === 'audio-capture') msg += 'Nebyl nalezen žádný mikrofon. Zkontrolujte, že je připojen a povolen.';
     else msg += e.error;
-    setVoiceStatus(msg, 'error');
+    setVoiceHeard(msg, 'error');
     stopRecording();
   };
   recognition.onend = () => {
@@ -1210,7 +1276,7 @@ function startRecording() {
   try {
     recognition.start();
   } catch(err) {
-    setVoiceStatus('❌ Mikrofon nefunguje: ' + err.message + '. Zkuste obnovit stránku.', 'error');
+    setVoiceHeard('❌ Mikrofon nefunguje: ' + err.message + '. Zkuste obnovit stránku.', 'error');
   }
 }
 
@@ -1219,92 +1285,399 @@ function stopRecording() {
   if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   document.getElementById('mic-btn').classList.remove('recording');
   document.getElementById('mic-btn').textContent = '🎤';
-  setVoiceStatus('Stiskněte mikrofon a diktujte — klíčová slova samy přepínají sekce a řádky.', '');
+  setVoiceHeard('Stiskněte mikrofon a diktujte', '');
+  setVoiceSub('klíčová slova samy přepínají sekce a řádky');
 }
 
-function setVoiceStatus(msg, cls) {
-  const el = document.getElementById('voice-status');
-  el.innerHTML = msg;
-  el.className = 'voice-status' + (cls ? ' ' + cls : '');
+function setVoiceHeard(msg, cls) {
+  const el = document.getElementById('voice-heard');
+  el.textContent = msg;
+  el.className = '';
+  if (cls === 'error') el.style.color = 'var(--red)';
+  else if (cls === 'listening') el.style.color = 'var(--green)';
+  else el.style.color = 'var(--gray-dark)';
+}
+
+function setVoiceSub(msg) {
+  document.getElementById('voice-sub').textContent = msg;
 }
 
 function processVoiceInput(text) {
-  const lower = text.toLowerCase();
-  // Check for section switch keywords
-  for (const [sec, kws] of Object.entries(KEYWORDS)) {
-    if (sec === 'next') continue;
-    if (kws.some(kw => lower.startsWith(kw))) {
-      // Switch section and write remainder
-      const kw = kws.find(kw => lower.startsWith(kw));
-      const remainder = text.slice(kw.length).trim();
-      setVoiceTarget(sec);
-      if (remainder) writeToSection(sec, remainder);
+  let lower = text.toLowerCase().trim();
+
+  // 1. Check "next row" phrases first (can appear with or without trailing text)
+  for (const phrase of NEXT_ROW_PHRASES) {
+    if (lower.startsWith(phrase)) {
+      const remainder = text.slice(phrase.length).trim();
+      advanceRow(voiceTarget);
+      if (remainder) processVoiceInput(remainder); // re-process remainder (may contain another keyword)
       return;
     }
   }
-  // Check for "další řádek"
-  if (lower.includes('další řádek') || lower.includes('nový řádek')) {
-    if (voiceTarget) {
-      voiceTargetRowIndex[voiceTarget] = (voiceTargetRowIndex[voiceTarget] || 0) + 1;
-      const remainder = text.replace(/další řádek|nový řádek/gi, '').trim();
-      if (remainder) writeToSection(voiceTarget, remainder);
+
+  // 2. Match field-level keywords (longest match wins)
+  let best = null;
+  for (const fk of FIELD_KEYWORDS) {
+    for (const kw of fk.keys) {
+      if (lower.startsWith(kw)) {
+        if (!best || kw.length > best.kw.length) best = { fk, kw };
+      }
     }
+  }
+
+  if (best) {
+    const remainder = text.slice(best.kw.length).trim();
+    handleFieldAction(best.fk, remainder, text);
     return;
   }
-  // Write to current target
-  if (voiceTarget) writeToSection(voiceTarget, text);
+
+  // 3. No keyword matched at all.
+  // Material section: try smart auto-fill (units/numbers go to jednotka/množství)
+  if (voiceTarget === 'material' && smartMaterialFill(text)) return;
+
+  // If current section is "lide" and the spoken text matches an existing person's name, switch active person.
+  if (voiceTarget === 'lide') {
+    const matchedRow = findPersonRowByName(text);
+    if (matchedRow !== -1) {
+      voiceActivePersonRow = matchedRow;
+      highlightRow('lide-tbody', matchedRow);
+      setVoiceSub('Aktivní osoba: ' + getCellValue('lide-tbody', matchedRow, 0));
+      return;
+    }
+  }
+
+  // 4. No match anywhere — ignore to avoid writing garbage into wrong cells.
 }
 
-function writeToSection(section, text) {
-  const idx = voiceTargetRowIndex[section] || 0;
-  if (section === 'notes') {
-    const ta = document.getElementById('cl-notes');
-    ta.value = ta.value ? ta.value + ' ' + text : text;
-    ta.classList.add('voice-active');
-    setTimeout(() => ta.classList.remove('voice-active'), 800);
+// ============ FIELD ACTION HANDLER ============
+function handleFieldAction(fk, remainder, fullText) {
+  const action = fk.action;
+  if (fk.section) setVoiceTarget(fk.section);
+
+  switch(action) {
+    case 'switchOnly':
+      // Just switches section, nothing to write
+      break;
+
+    case 'zakazka':
+      setField('cl-zakazka', remainder);
+      break;
+
+    case 'vedouci':
+      setField('cl-vedouci', remainder);
+      break;
+
+    case 'note':
+      setNote(remainder, false);
+      break;
+
+    case 'noteNewLine':
+      setNote(remainder, true);
+      break;
+
+    case 'vozik':
+      setField('cl-vozik', normalizeAnoNe(remainder));
+      break;
+
+    case 'pocasi':
+      setField('cl-pocasi', remainder);
+      break;
+
+    case 'jmeno':
+      // depends on current active section
+      if (voiceTarget === 'cinnosti') {
+        cinnostSetField(2, remainder); // jméno column in činnosti
+      } else {
+        // Lidé: new person / new row
+        voiceTarget = 'lide';
+        switchTab('lide');
+        const row = nextEmptyOrNewPersonRow();
+        voiceActivePersonRow = row;
+        setCellValue('lide-tbody', row, 0, remainder);
+        highlightRow('lide-tbody', row);
+        setVoiceSub('Aktivní osoba: ' + remainder);
+      }
+      break;
+
+    case 'osobaZacatek':
+      personSetField(1, remainder);
+      break;
+
+    case 'prijezd':
+      // Ambiguous: if an active person row exists -> person's "PŘÍJEZD" (col 2)
+      // otherwise -> vehicle "PŘÍJEZD NA ZAKÁZKU"
+      if (voiceActivePersonRow !== -1) {
+        personSetField(2, remainder);
+      } else {
+        setField('voz-prijezd', extractNumber(remainder) ?? remainder);
+      }
+      break;
+
+    case 'osobaObed':
+      personSetField(3, remainder);
+      break;
+
+    case 'osobaKonec':
+      personSetField(4, remainder);
+      break;
+
+    case 'kilometry':
+      // Ambiguous: if active person row -> person's OS.KM (col 5)
+      // otherwise -> vehicle "POČET KM"
+      if (voiceActivePersonRow !== -1) {
+        personSetField(5, extractNumber(remainder));
+      } else {
+        setField('voz-pocet', extractNumber(remainder));
+      }
+      break;
+
+    case 'osobaPrispevek':
+      personSetField(7, extractNumber(remainder));
+      break;
+
+    case 'vozidloTyp':
+      // "auto"/"vozidlo" + text => vehicle type
+      setField('voz-typ', remainder);
+      voiceActivePersonRow = -1; // leaving person context
+      break;
+
+    case 'vozidloOdjezd':
+      setField('voz-odjezd', extractNumber(remainder) ?? remainder);
+      break;
+
+    case 'materialNovy':
+      switchTab('material');
+      voiceActiveMaterialRow = nextEmptyRow('material-tbody', voiceActiveMaterialRow);
+      setCellValue('material-tbody', voiceActiveMaterialRow, 0, remainder);
+      highlightRow('material-tbody', voiceActiveMaterialRow);
+      break;
+
+    case 'materialJednotka':
+      ensureMaterialRow();
+      setCellValue('material-tbody', voiceActiveMaterialRow, 1, normalizeUnit(remainder) || remainder);
+      highlightCell('material-tbody', voiceActiveMaterialRow, 1);
+      break;
+
+    case 'materialMnozstvi':
+      ensureMaterialRow();
+      setCellValue('material-tbody', voiceActiveMaterialRow, 2, extractNumber(remainder) ?? remainder);
+      highlightCell('material-tbody', voiceActiveMaterialRow, 2);
+      break;
+
+    case 'cinnostNova':
+      switchTab('cinnosti');
+      voiceActiveCinnostRow = nextEmptyRow('cinnosti-tbody', voiceActiveCinnostRow);
+      setCellValue('cinnosti-tbody', voiceActiveCinnostRow, 0, remainder);
+      highlightRow('cinnosti-tbody', voiceActiveCinnostRow);
+      break;
+
+    case 'cinnostVykon':
+      ensureCinnostRow();
+      setCellValue('cinnosti-tbody', voiceActiveCinnostRow, 1, remainder);
+      highlightCell('cinnosti-tbody', voiceActiveCinnostRow, 1);
+      break;
+  }
+
+  // If material section active and remainder is a bare number/unit (no keyword), still try smart fill
+  if (action === 'switchOnly' && remainder) {
+    // e.g. user said "materiál" then paused, then said number separately -> handled in smartMaterialFill below
+  }
+}
+
+// ============ SMART MATERIAL AUTO-FILL (numbers/units without keyword) ============
+function smartMaterialFill(text) {
+  const lower = text.toLowerCase().trim();
+  if (voiceActiveMaterialRow === -1) return false;
+  // Check if it's purely a unit word
+  const unit = normalizeUnit(lower);
+  if (unit && /^[a-zá-ž0-9. ]+$/i.test(lower) && lower.split(' ').length <= 2) {
+    setCellValue('material-tbody', voiceActiveMaterialRow, 1, unit);
+    highlightCell('material-tbody', voiceActiveMaterialRow, 1);
+    return true;
+  }
+  // Check if it's purely a number
+  const num = extractNumber(lower);
+  if (num !== null && /^[\d,.\s]+$/.test(lower.replace(/kus|ks|kg|h|l|m/gi,'').trim())) {
+    setCellValue('material-tbody', voiceActiveMaterialRow, 2, num);
+    highlightCell('material-tbody', voiceActiveMaterialRow, 2);
+    return true;
+  }
+  return false;
+}
+
+// ============ HELPERS ============
+function setField(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = value === null || value === undefined ? '' : value;
+  highlightInput(el);
+}
+
+function setNote(text, newLine) {
+  const ta = document.getElementById('cl-notes');
+  if (newLine) {
+    voiceNotesPendingNewLine = true;
+  }
+  if (!text) return; // just marked pending newline, nothing to write yet
+  writeNoteText(ta, text);
+}
+
+function appendNote(text) {
+  const ta = document.getElementById('cl-notes');
+  writeNoteText(ta, text);
+}
+
+function writeNoteText(ta, text) {
+  if (!ta.value) {
+    ta.value = text;
+  } else if (voiceNotesPendingNewLine) {
+    ta.value = ta.value + '\n' + text;
+  } else {
+    ta.value = ta.value + ' ' + text;
+  }
+  voiceNotesPendingNewLine = false;
+  highlightInput(ta);
+}
+
+function normalizeAnoNe(text) {
+  const t = text.toLowerCase();
+  if (t.includes('ano') || t.includes('jo')) return 'ANO';
+  if (t.includes('ne')) return 'NE';
+  return text;
+}
+
+function normalizeUnit(text) {
+  const t = text.toLowerCase().trim();
+  return UNIT_WORDS[t] || null;
+}
+
+function extractNumber(text) {
+  const m = text.match(/-?\d+([.,]\d+)?/);
+  if (!m) return null;
+  return m[0].replace(',', '.');
+}
+
+// ---- Lidé table helpers ----
+function getLideRows() {
+  return document.getElementById('lide-tbody').querySelectorAll('tr');
+}
+function getCellValue(tbodyId, rowIdx, colIdx) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  if (!rows[rowIdx]) return '';
+  const inputs = rows[rowIdx].querySelectorAll('input');
+  return inputs[colIdx] ? inputs[colIdx].value : '';
+}
+function setCellValue(tbodyId, rowIdx, colIdx, value) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  if (!rows[rowIdx]) return;
+  const inputs = rows[rowIdx].querySelectorAll('input');
+  if (inputs[colIdx]) inputs[colIdx].value = (value === null || value === undefined) ? '' : value;
+}
+function highlightRow(tbodyId, rowIdx) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  if (!rows[rowIdx]) return;
+  rows[rowIdx].querySelectorAll('input').forEach(highlightInput);
+}
+function highlightCell(tbodyId, rowIdx, colIdx) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  if (!rows[rowIdx]) return;
+  const inputs = rows[rowIdx].querySelectorAll('input');
+  if (inputs[colIdx]) highlightInput(inputs[colIdx]);
+}
+
+function findPersonRowByName(text) {
+  const rows = getLideRows();
+  const lower = text.toLowerCase().trim();
+  for (let i = 0; i < rows.length; i++) {
+    const name = (rows[i].querySelectorAll('input')[0]?.value || '').toLowerCase().trim();
+    if (name && (name === lower || name.includes(lower) || lower.includes(name))) return i;
+  }
+  return -1;
+}
+
+function nextEmptyOrNewPersonRow() {
+  const rows = getLideRows();
+  for (let i = 0; i < rows.length; i++) {
+    const name = rows[i].querySelectorAll('input')[0]?.value || '';
+    if (!name) return i;
+  }
+  addLideRow();
+  return getLideRows().length - 1;
+}
+
+function personSetField(colIdx, value) {
+  if (voiceActivePersonRow === -1) {
+    // No active person - create/use first empty row
+    voiceActivePersonRow = nextEmptyOrNewPersonRow();
+  }
+  setCellValue('lide-tbody', voiceActivePersonRow, colIdx, value);
+  highlightCell('lide-tbody', voiceActivePersonRow, colIdx);
+}
+
+// ---- Material / Činnosti row helpers ----
+function nextEmptyRowAfter(tbodyId, currentRow) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  const start = currentRow === -1 ? 0 : currentRow + 1;
+  for (let i = start; i < rows.length; i++) {
+    const firstVal = rows[i].querySelectorAll('input')[0]?.value;
+    if (!firstVal) return i;
+  }
+  // All full from start - add new row
+  if (tbodyId === 'material-tbody') addMaterialRow();
+  else if (tbodyId === 'cinnosti-tbody') addCinnostRow();
+  return document.getElementById(tbodyId).querySelectorAll('tr').length - 1;
+}
+
+function nextEmptyRow(tbodyId, currentActive) {
+  const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+  // If current active row's first cell is still empty, keep using it
+  if (currentActive !== -1 && rows[currentActive]) {
+    const firstVal = rows[currentActive].querySelectorAll('input')[0]?.value;
+    if (!firstVal) return currentActive;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const firstVal = rows[i].querySelectorAll('input')[0]?.value;
+    if (!firstVal) return i;
+  }
+  // All full - add new row
+  if (tbodyId === 'material-tbody') addMaterialRow();
+  else if (tbodyId === 'cinnosti-tbody') addCinnostRow();
+  return document.getElementById(tbodyId).querySelectorAll('tr').length - 1;
+}
+
+function ensureMaterialRow() {
+  if (voiceActiveMaterialRow === -1) voiceActiveMaterialRow = nextEmptyRow('material-tbody', -1);
+}
+function ensureCinnostRow() {
+  if (voiceActiveCinnostRow === -1) voiceActiveCinnostRow = nextEmptyRow('cinnosti-tbody', -1);
+}
+function cinnostSetField(colIdx, value) {
+  ensureCinnostRow();
+  setCellValue('cinnosti-tbody', voiceActiveCinnostRow, colIdx, value);
+  highlightCell('cinnosti-tbody', voiceActiveCinnostRow, colIdx);
+}
+
+// ---- "Next row" handling per section ----
+function advanceRow(section) {
+  if (section === 'checklist' || section === 'notes') {
+    voiceNotesPendingNewLine = true;
     return;
   }
   if (section === 'lide') {
-    const rows = document.getElementById('lide-tbody').querySelectorAll('tr');
-    const targetRow = findEmptyRow(rows, idx);
-    if (targetRow !== -1) {
-      const inputs = rows[targetRow].querySelectorAll('input');
-      const firstEmpty = Array.from(inputs).findIndex(i => !i.value);
-      const inp = inputs[firstEmpty >= 0 ? firstEmpty : 0];
-      inp.value = text; highlightInput(inp);
-      voiceTargetRowIndex[section] = targetRow;
-    }
+    voiceActivePersonRow = nextEmptyOrNewPersonRow();
+    setVoiceSub('Nová osoba (řádek ' + (voiceActivePersonRow+1) + ')');
     return;
   }
   if (section === 'material') {
-    const rows = document.getElementById('material-tbody').querySelectorAll('tr');
-    const targetRow = findEmptyRow(rows, idx);
-    if (targetRow !== -1) {
-      const inp = rows[targetRow].querySelectorAll('input')[0];
-      inp.value = text; highlightInput(inp);
-      voiceTargetRowIndex[section] = targetRow;
-    }
+    voiceActiveMaterialRow = nextEmptyRowAfter('material-tbody', voiceActiveMaterialRow);
+    highlightRow('material-tbody', voiceActiveMaterialRow);
     return;
   }
   if (section === 'cinnosti') {
-    const rows = document.getElementById('cinnosti-tbody').querySelectorAll('tr');
-    const targetRow = findEmptyRow(rows, idx);
-    if (targetRow !== -1) {
-      const inp = rows[targetRow].querySelectorAll('input')[0];
-      inp.value = text; highlightInput(inp);
-      voiceTargetRowIndex[section] = targetRow;
-    }
+    voiceActiveCinnostRow = nextEmptyRowAfter('cinnosti-tbody', voiceActiveCinnostRow);
+    highlightRow('cinnosti-tbody', voiceActiveCinnostRow);
     return;
   }
-}
-
-function findEmptyRow(rows, startIdx) {
-  // Find first empty row from startIdx
-  for (let i = startIdx; i < rows.length; i++) {
-    const inputs = rows[i].querySelectorAll('input[type=text], input[type=number]');
-    if (Array.from(inputs).some(inp => !inp.value)) return i;
-  }
-  return rows.length - 1; // fallback to last row
 }
 
 function highlightInput(inp) {
@@ -1382,7 +1755,10 @@ function clearForm() {
   renderChecklist();
   setupVozKm();
   // Reset voice row pointers
-  voiceTargetRowIndex = {};
+  voiceActivePersonRow = -1;
+  voiceActiveMaterialRow = -1;
+  voiceActiveCinnostRow = -1;
+  voiceNotesPendingNewLine = false;
   // Reset weather display
   document.getElementById('weather-display').innerHTML = '';
   document.getElementById('cl-pocasi').value = '';
