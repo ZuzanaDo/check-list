@@ -336,7 +336,7 @@
 <div id="app-section">
   <!-- Action bar -->
   <div class="action-bar">
-    <button class="btn btn-primary btn-sm" onclick="showNewZakazkaModal()">➕ Nová zakázka</button>
+    <button class="btn btn-primary btn-sm" onclick="createZakazka()">➕ Nová zakázka</button>
     <button class="btn btn-secondary btn-sm" onclick="saveLocal()">💾 Uložit</button>
     <button class="btn btn-secondary btn-sm" onclick="loadLocal()">📂 Načíst</button>
     <button class="btn btn-orange btn-sm" onclick="exportPDF()">📄 PDF</button>
@@ -573,19 +573,6 @@
   </div>
 </div>
 
-<!-- NEW ZAKÁZKA MODAL -->
-<div class="modal-overlay" id="modal-new" style="display:none">
-  <div class="modal">
-    <h3>➕ Nová zakázka</h3>
-    <input type="text" id="new-zakazka-name" placeholder="Název zakázky (např. Praha - Novák)">
-    <input type="text" id="new-zakazka-lokalita" placeholder="Lokalita (pro počasí, např. Praha)">
-    <div class="modal-btns">
-      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
-      <button class="btn btn-primary" onclick="createZakazka()">Vytvořit</button>
-    </div>
-  </div>
-</div>
-
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
@@ -594,7 +581,7 @@
 const CLIENT_ID = '256930236354-3jqdr9of3gdm84qt74dvv0hoig3674ge.apps.googleusercontent.com';
 const SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
 const SPREADSHEET_NAME = 'Check list — data';
-const TEMPLATE_SHEET_NAME = 'List2';
+let TEMPLATE_SHEET_NAME = 'List2'; // will be auto-detected from the existing spreadsheet on load
 const TEMPLATE_SPREADSHEET_ID = '1QG5nZVqsYfUDk15X-BrGxv7aTVY5BQBNAj4t4IwaYHo';
 
 // ===================== STATE =====================
@@ -753,6 +740,7 @@ async function findOrCreateSpreadsheet() {
     if (data.files && data.files.length > 0) {
       spreadsheetId = data.files[0].id;
       showToast('Spreadsheet nalezen ✓', 'success');
+      await detectTemplateSheet();
     } else {
       await createSpreadsheet();
     }
@@ -761,6 +749,23 @@ async function findOrCreateSpreadsheet() {
   } catch(e) {
     updateSheetsBadge('disconnected');
     showToast('Chyba připojení k Sheets', 'error');
+  }
+}
+
+// Detect the name of the template sheet inside the existing spreadsheet.
+// Prefers a sheet literally named "List2"; otherwise falls back to the first sheet.
+async function detectTemplateSheet() {
+  try {
+    const r = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    const data = await r.json();
+    if (!data.sheets || !data.sheets.length) return;
+    const preferred = data.sheets.find(s => s.properties.title === 'List2');
+    TEMPLATE_SHEET_NAME = preferred ? 'List2' : data.sheets[0].properties.title;
+  } catch(e) {
+    console.error('detectTemplateSheet failed', e);
   }
 }
 
@@ -877,7 +882,37 @@ async function ensureSheetExists(name) {
     { headers: { Authorization: 'Bearer ' + accessToken } }
   );
   const data = await r.json();
-  const exists = data.sheets && data.sheets.some(s => s.properties.title === name);
+  let existingSheet = data.sheets && data.sheets.find(s => s.properties.title === name);
+
+  // If the sheet exists but looks like a stale empty fallback (missing template header
+  // in A5), delete it so it can be recreated as a proper copy of the template.
+  if (existingSheet && name !== TEMPLATE_SHEET_NAME) {
+    try {
+      const checkResp = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(name)}!A5`,
+        { headers: { Authorization: 'Bearer ' + accessToken } }
+      );
+      const checkData = await checkResp.json();
+      const hasHeader = checkData.values && checkData.values[0] && checkData.values[0][0];
+      if (!hasHeader) {
+        await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+          {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests: [{ deleteSheet: { sheetId: existingSheet.properties.sheetId } }] })
+          }
+        );
+        existingSheet = null;
+        // refresh data.sheets reference for the template lookup below
+        data.sheets = data.sheets.filter(s => s.properties.title !== name);
+      }
+    } catch(e) {
+      console.error('Stale sheet check failed', e);
+    }
+  }
+
+  const exists = !!existingSheet;
   if (!exists) {
     // Find the template sheet to duplicate
     const template = data.sheets.find(s => s.properties.title === TEMPLATE_SHEET_NAME);
@@ -1011,35 +1046,19 @@ function buildSheetValueRanges(d, sheetName) {
 }
 
 // ===================== ZAKÁZKY =====================
-function showNewZakazkaModal() {
-  document.getElementById('modal-new').style.display = 'flex';
-  document.getElementById('new-zakazka-name').focus();
-}
-function closeModal() {
-  document.getElementById('modal-new').style.display = 'none';
-}
 function createZakazka() {
-  const name = document.getElementById('new-zakazka-name').value.trim();
-  if (!name) { showToast('Zadejte název zakázky', 'error'); return; }
-  const lokalita = document.getElementById('new-zakazka-lokalita').value.trim();
+  // Generate a temporary name; user will dictate the real name via "zakázka [název]"
+  const ts = new Date();
+  const name = 'Zakázka_' + ts.toISOString().slice(0,10) + '_' + ts.getHours() + ts.getMinutes();
   currentZakazka = name;
-  if (!zakázky[name]) zakázky[name] = { lokalita };
   clearForm();
   // Add to select
   const sel = document.getElementById('zakazka-select');
-  let exists = false;
-  for (let o of sel.options) if (o.value === name) { exists = true; sel.value = name; break; }
-  if (!exists) {
-    const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
-    sel.appendChild(opt);
-    sel.value = name;
-  }
-  document.getElementById('cl-zakazka').value = name;
-  closeModal();
-  if (lokalita) autoWeather(lokalita);
-  else document.getElementById('weather-display').innerHTML = '';
-  showToast('Zakázka vytvořena: ' + name, 'success');
+  const opt = document.createElement('option');
+  opt.value = name; opt.textContent = name;
+  sel.appendChild(opt);
+  sel.value = name;
+  document.getElementById('weather-display').innerHTML = '';
 }
 function loadZakazka() {
   const name = document.getElementById('zakazka-select').value;
@@ -1053,7 +1072,7 @@ function loadZakazka() {
 // ===================== WEATHER =====================
 async function autoWeather(lokalita) {
   // Use Open-Meteo (free, no API key) + geocoding
-  const loc = lokalita || document.getElementById('new-zakazka-lokalita')?.value || 'Praha';
+  const loc = lokalita || document.getElementById('cl-zakazka')?.value || 'Praha';
   const datum = document.getElementById('cl-datum').value || new Date().toISOString().split('T')[0];
   try {
     // Geocode
@@ -1315,38 +1334,95 @@ function processVoiceInput(text) {
     }
   }
 
-  // 2. Match field-level keywords (longest match wins)
-  let best = null;
+  // 2. Find ALL keyword matches anywhere in the text, build ordered segments.
+  // This handles fast/long dictation like "materiál cement jednotka kg množství 50"
+  // where multiple field keywords appear in one recognition result.
+  const matches = []; // {start, end, fk, kw}
   for (const fk of FIELD_KEYWORDS) {
     for (const kw of fk.keys) {
-      if (lower.startsWith(kw)) {
-        if (!best || kw.length > best.kw.length) best = { fk, kw };
+      let idx = 0;
+      while (true) {
+        const pos = lower.indexOf(kw, idx);
+        if (pos === -1) break;
+        // Require word boundary before the keyword (start of string or preceded by space)
+        const boundaryOk = pos === 0 || lower[pos-1] === ' ';
+        if (boundaryOk) matches.push({ start: pos, end: pos + kw.length, fk, kw });
+        idx = pos + 1;
       }
     }
   }
 
-  if (best) {
-    const remainder = text.slice(best.kw.length).trim();
-    handleFieldAction(best.fk, remainder, text);
-    return;
+  if (matches.length === 0) {
+    // No keyword found anywhere.
+    if (voiceTarget === 'material' && smartMaterialFill(text)) return;
+    if (voiceTarget === 'lide') {
+      const matchedRow = findPersonRowByName(text);
+      if (matchedRow !== -1) {
+        voiceActivePersonRow = matchedRow;
+        highlightRow('lide-tbody', matchedRow);
+        setVoiceSub('Aktivní osoba: ' + getCellValue('lide-tbody', matchedRow, 0));
+        return;
+      }
+    }
+    return; // ignore unmatched speech
   }
 
-  // 3. No keyword matched at all.
-  // Material section: try smart auto-fill (units/numbers go to jednotka/množství)
-  if (voiceTarget === 'material' && smartMaterialFill(text)) return;
+  // Sort matches by position, then resolve overlaps: keep the longest keyword starting earliest.
+  matches.sort((a,b) => a.start - b.start || (b.end-b.start) - (a.end-a.start));
+  const chosen = [];
+  let lastEnd = -1;
+  for (const m of matches) {
+    if (m.start < lastEnd) continue; // overlaps a previously chosen (longer) match
+    // If another match starts at the same position but is longer, prefer it (already sorted)
+    chosen.push(m);
+    lastEnd = m.end;
+  }
 
-  // If current section is "lide" and the spoken text matches an existing person's name, switch active person.
-  if (voiceTarget === 'lide') {
-    const matchedRow = findPersonRowByName(text);
-    if (matchedRow !== -1) {
-      voiceActivePersonRow = matchedRow;
-      highlightRow('lide-tbody', matchedRow);
-      setVoiceSub('Aktivní osoba: ' + getCellValue('lide-tbody', matchedRow, 0));
-      return;
+  // If there's leading text before the first keyword, and we're in 'lide' section,
+  // try to interpret it as an existing person's name switch.
+  if (chosen[0].start > 0 && voiceTarget === 'lide') {
+    const leading = text.slice(0, chosen[0].start).trim();
+    if (leading) {
+      const matchedRow = findPersonRowByName(leading);
+      if (matchedRow !== -1) {
+        voiceActivePersonRow = matchedRow;
+        highlightRow('lide-tbody', matchedRow);
+        setVoiceSub('Aktivní osoba: ' + getCellValue('lide-tbody', matchedRow, 0));
+      }
     }
   }
 
-  // 4. No match anywhere — ignore to avoid writing garbage into wrong cells.
+  // Process each keyword segment: text between this keyword's end and the next keyword's start.
+  for (let i = 0; i < chosen.length; i++) {
+    const m = chosen[i];
+    const segEnd = (i+1 < chosen.length) ? chosen[i+1].start : text.length;
+    let remainder = text.slice(m.end, segEnd).trim();
+    // Check if remainder itself begins with a "next row" phrase
+    let didAdvance = false;
+    for (const phrase of NEXT_ROW_PHRASES) {
+      const rl = remainder.toLowerCase();
+      if (rl.startsWith(phrase)) {
+        handleFieldAction(m.fk, '', text); // apply this field's action with no value first if needed
+        advanceRow(voiceTarget);
+        remainder = remainder.slice(phrase.length).trim();
+        didAdvance = true;
+        break;
+      }
+    }
+    if (didAdvance) {
+      if (remainder) {
+        // remainder after "další řádek" belongs to the NEW row of the same section
+        writeRemainderToActiveField(m.fk, remainder);
+      }
+      continue;
+    }
+    handleFieldAction(m.fk, remainder, text);
+  }
+}
+
+// Used when text after "další řádek" continues the same field type (no new keyword)
+function writeRemainderToActiveField(fk, remainder) {
+  handleFieldAction(fk, remainder, remainder);
 }
 
 // ============ FIELD ACTION HANDLER ============
@@ -1361,6 +1437,9 @@ function handleFieldAction(fk, remainder, fullText) {
 
     case 'zakazka':
       setField('cl-zakazka', remainder);
+      zakázky[currentZakazka] = zakázky[currentZakazka] || {};
+      zakázky[currentZakazka].lokalita = remainder;
+      autoWeather(remainder);
       break;
 
     case 'vedouci':
@@ -1452,17 +1531,25 @@ function handleFieldAction(fk, remainder, fullText) {
       highlightRow('material-tbody', voiceActiveMaterialRow);
       break;
 
-    case 'materialJednotka':
+    case 'materialJednotka': {
       ensureMaterialRow();
-      setCellValue('material-tbody', voiceActiveMaterialRow, 1, normalizeUnit(remainder) || remainder);
-      highlightCell('material-tbody', voiceActiveMaterialRow, 1);
+      const r1 = materialRowForColumn(1);
+      if (r1 !== -1) {
+        setCellValue('material-tbody', r1, 1, normalizeUnit(remainder) || remainder);
+        highlightCell('material-tbody', r1, 1);
+      }
       break;
+    }
 
-    case 'materialMnozstvi':
+    case 'materialMnozstvi': {
       ensureMaterialRow();
-      setCellValue('material-tbody', voiceActiveMaterialRow, 2, extractNumber(remainder) ?? remainder);
-      highlightCell('material-tbody', voiceActiveMaterialRow, 2);
+      const r2 = materialRowForColumn(2);
+      if (r2 !== -1) {
+        setCellValue('material-tbody', r2, 2, extractNumber(remainder) ?? remainder);
+        highlightCell('material-tbody', r2, 2);
+      }
       break;
+    }
 
     case 'cinnostNova':
       switchTab('cinnosti');
@@ -1491,18 +1578,43 @@ function smartMaterialFill(text) {
   // Check if it's purely a unit word
   const unit = normalizeUnit(lower);
   if (unit && /^[a-zá-ž0-9. ]+$/i.test(lower) && lower.split(' ').length <= 2) {
-    setCellValue('material-tbody', voiceActiveMaterialRow, 1, unit);
-    highlightCell('material-tbody', voiceActiveMaterialRow, 1);
+    const row = materialRowForColumn(1);
+    if (row === -1) return false;
+    setCellValue('material-tbody', row, 1, unit);
+    highlightCell('material-tbody', row, 1);
     return true;
   }
   // Check if it's purely a number
   const num = extractNumber(lower);
   if (num !== null && /^[\d,.\s]+$/.test(lower.replace(/kus|ks|kg|h|l|m/gi,'').trim())) {
-    setCellValue('material-tbody', voiceActiveMaterialRow, 2, num);
-    highlightCell('material-tbody', voiceActiveMaterialRow, 2);
+    const row = materialRowForColumn(2);
+    if (row === -1) return false;
+    setCellValue('material-tbody', row, 2, num);
+    highlightCell('material-tbody', row, 2);
     return true;
   }
   return false;
+}
+
+// Find the row to write column `col` into: prefer voiceActiveMaterialRow if that
+// column is still empty there; otherwise advance to the next row with an empty `col`.
+function materialRowForColumn(col) {
+  const rows = document.getElementById('material-tbody').querySelectorAll('tr');
+  let r = voiceActiveMaterialRow;
+  if (r !== -1 && rows[r]) {
+    const val = rows[r].querySelectorAll('input')[col]?.value;
+    if (!val) return r;
+  }
+  // Advance to next row (must have a název already, i.e. col0 filled, and col empty)
+  for (let i = (r === -1 ? 0 : r + 1); i < rows.length; i++) {
+    const val = rows[i].querySelectorAll('input')[col]?.value;
+    const nazev = rows[i].querySelectorAll('input')[0]?.value;
+    if (nazev && !val) {
+      voiceActiveMaterialRow = i;
+      return i;
+    }
+  }
+  return -1;
 }
 
 // ============ HELPERS ============
